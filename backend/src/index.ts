@@ -28,23 +28,6 @@ app.get('/users', async (req: Request, res: Response) => {
     }
 });
 
-app.post('/silviu', async (req: Request, res: Response) => {
-    try {
-        const { name, email, age, address } = req.body;
-        const newRecord = await prisma.silviu.create({
-            data: {
-                name,
-                email,
-                age: age ? parseInt(age, 10) : null,
-                address
-            }
-        });
-        res.status(201).json(newRecord);
-    } catch (error) {
-        console.error('Error creating record:', error);
-        res.status(500).json({ error: 'Failed to create record' });
-    }
-});
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
