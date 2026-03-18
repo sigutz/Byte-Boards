@@ -34,7 +34,7 @@ jobs:
             fi
 
             echo "── Writing .env from secrets ──"
-            echo "DATABASE_URL=$DATABASE_URL" > .env
+            echo "DATABASE_URL=$DATABASE_URL" > backend/.env
 
             echo "── Bringing down old containers ──"
             docker compose down --remove-orphans
