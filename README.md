@@ -52,9 +52,10 @@ echo 'DATABASE_URL="postgresql://admin:oracle@host.docker.internal:5432/postgres
 
 ---
 
-### 4. Start the backend
+### 4. Start the container app
 
 ```bash
+cd ../
 docker compose up -d --build
 ```
 
