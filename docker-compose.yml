@@ -12,6 +12,8 @@ services:
       NODE_ENV: production
     networks:
       - app_network
+    extra_hosts:
+      - "cine406.go.ro:host-gateway"
 
   frontend:
     build:
