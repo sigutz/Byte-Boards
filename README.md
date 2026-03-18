@@ -2,7 +2,13 @@
 
 ### 1. Create the local database
 
-First, start a PostgreSQL database using Docker. Create a `docker-compose.yml` file:
+First, create a folder fot the database:
+```bash
+mkdir db
+cd db
+```
+
+Start a PostgreSQL database using Docker. Create a `docker-compose.yml` file:
 
 ```yaml
 version: '3.8'
@@ -36,6 +42,7 @@ docker compose up -d --build
 ### 2. Clone the project
 
 ```bash
+cd ..
 git clone https://github.com/sigutz/Byte-Boards.git
 ```
 
@@ -55,7 +62,7 @@ echo 'DATABASE_URL="postgresql://admin:oracle@host.docker.internal:5432/postgres
 ### 4. Start the container app
 
 ```bash
-cd ../
+cd ..
 docker compose up -d --build
 ```
 
