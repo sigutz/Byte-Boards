@@ -23,13 +23,13 @@ jobs:
           script: |
             set -e
 
-            if [ ! -d "$HOME/test3" ]; then
+            if [ ! -d "$HOME/bytenboard" ]; then
               echo "── Repository not found. Cloning... ──"
-              git clone https://github.com/${{ github.repository }}.git ~/test3
-              cd ~/test3
+              git clone https://github.com/${{ github.repository }}.git ~/bytenboard
+              cd ~/bytenboard
             else
               echo "── Repository found. Pulling latest code... ──"
-              cd ~/test3
+              cd ~/bytenboard
               git pull origin main
             fi
 
