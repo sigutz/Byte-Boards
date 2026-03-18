@@ -7,13 +7,15 @@ services:
     restart: unless-stopped
     ports:
       - "5000:5000"
+    env_file:
+      - ./backend/.env
     environment:
-      DATABASE_URL: ${DATABASE_URL}
       NODE_ENV: production
     networks:
       - app_network
     extra_hosts:
       - "cine406.go.ro:host-gateway"
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -22,7 +24,7 @@ services:
     container_name: byte_boards_frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "5173:80"
     depends_on:
       - backend
     networks:
