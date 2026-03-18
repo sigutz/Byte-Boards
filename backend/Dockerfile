@@ -40,5 +40,5 @@ COPY prisma.config.ts ./
 
 EXPOSE 5000
 
-# Sync schema then start server
-CMD ["sh", "-c", "npx prisma db push && node dist/index.js"]
+# Run migrations then start server
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
