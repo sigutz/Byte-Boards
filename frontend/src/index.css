@@ -1,1 +1,109 @@
 @import "tailwindcss";
+
+:root {
+  font-family: Inter, system-ui, Arial, sans-serif;
+  color: #e5e7eb;
+  background: #0f172a;
+}
+
+body {
+  margin: 0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 32px auto;
+  padding: 0 16px;
+}
+
+.card {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.toolbar {
+  margin: 20px 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.centered-buttons {
+  justify-content: center;
+}
+
+select,
+button {
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  background: #0b1220;
+  color: #e5e7eb;
+  padding: 8px 10px;
+}
+
+.active-tab {
+  border-color: #60a5fa;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list li {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.list li.active {
+  border-color: #60a5fa;
+}
+
+.log {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.key-moments-box {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #3b82f6;
+  border-radius: 10px;
+  background: #0a1020;
+}
+
+.key-moments-box h3 {
+  margin-top: 0;
+}
+
+.error {
+  color: #fda4af;
+}
+
+@media (max-width: 980px) {
+  .button-row {
+    flex-direction: column;
+  }
+}

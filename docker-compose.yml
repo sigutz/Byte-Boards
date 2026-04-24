@@ -12,10 +12,7 @@ services:
     environment:
       NODE_ENV: production
     networks:
-      - app_network
-    extra_hosts:
-      - "cine406.go.ro:host-gateway"
-      - "host.docker.internal:host-gateway"
+      - byte_boards_net
 
   frontend:
     build:
@@ -28,8 +25,7 @@ services:
     depends_on:
       - backend
     networks:
-      - app_network
-
+      - byte_boards_net 
 networks:
-  app_network:
-    driver: bridge
+  byte_boards_net:
+    external: true
