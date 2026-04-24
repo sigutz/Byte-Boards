@@ -11,3 +11,69 @@ model User {
   name  String?
   email String  @unique
 }
+
+model Agent {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  wonMatches  Match[]      @relation("MatchWinner")
+  matches     MatchAgent[]
+  events      MatchEvent[] @relation("EventActor")
+}
+
+model Match {
+  id         String       @id @default(cuid())
+  gameType   String
+  status     MatchStatus  @default(PENDING)
+  createdAt  DateTime     @default(now())
+  startedAt  DateTime?
+  endedAt    DateTime?
+  winnerId   Int?
+  summary    String?
+  shareToken String       @unique @default(cuid())
+  winner     Agent?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  agents     MatchAgent[]
+  events     MatchEvent[]
+}
+
+model MatchAgent {
+  matchId   String
+  agentId   Int
+  seat      Int
+  score     Int         @default(0)
+  resources Int         @default(0)
+  position  Int?
+  match     Match       @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  agent     Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([matchId, agentId])
+  @@unique([matchId, seat])
+}
+
+model MatchEvent {
+  id        String    @id @default(cuid())
+  matchId   String
+  turn      Int
+  type      EventType
+  text      String
+  actorId   Int?
+  payload   Json?
+  createdAt DateTime  @default(now())
+  match     Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  actor     Agent?    @relation("EventActor", fields: [actorId], references: [id], onDelete: SetNull)
+}
+
+enum MatchStatus {
+  PENDING
+  LIVE
+  COMPLETED
+}
+
+enum EventType {
+  COMMENTARY
+  MOVE
+  RESOURCE
+  RESULT
+}
