@@ -1,0 +1,409 @@
+import type { Agent, AgentMetric, MatchDetail } from '../types';
+import { PLAYER_COLORS, EVENT_STYLES, TARGET_SCORE } from '../types';
+
+interface Props {
+  gameTypes: string[];
+  selectedType: string;
+  onTypeChange: (t: string) => void;
+  agents: Agent[];
+  metrics: AgentMetric[];
+  selectedAgentIds: number[];
+  toggleAgent: (id: number) => void;
+  isCreatingMatch: boolean;
+  startMatch: () => void;
+  selectedMatch: MatchDetail | null;
+  copyShareLink: () => void;
+  navigate: (path: string) => void;
+  error: string;
+}
+
+function StatusBadge({ status }: { status: 'LIVE' | 'COMPLETED' }) {
+  if (status === 'LIVE') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '3px 9px', borderRadius: 20,
+        fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+        background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.35)',
+        color: '#22c55e',
+      }}>
+        <span className="live-dot" style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: '#22c55e', flexShrink: 0, display: 'inline-block',
+        }} />
+        LIVE
+      </span>
+    );
+  }
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '3px 9px', borderRadius: 20,
+      fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+      background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)',
+      color: '#60a5fa',
+    }}>
+      DONE
+    </span>
+  );
+}
+
+function VPBar({ score, color }: { score: number; color: string }) {
+  const pct = Math.min((score / TARGET_SCORE) * 100, 100);
+  return (
+    <div style={{ height: 5, borderRadius: 3, background: '#1a2e47', overflow: 'hidden', flex: 1 }}>
+      <div
+        className="vp-bar-fill"
+        style={{
+          height: '100%', width: `${pct}%`, borderRadius: 3,
+          background: `linear-gradient(90deg, ${color}88, ${color})`,
+          transition: 'width 0.5s ease',
+        }}
+      />
+    </div>
+  );
+}
+
+export default function Dashboard({
+  gameTypes, selectedType, onTypeChange,
+  agents, metrics, selectedAgentIds, toggleAgent,
+  isCreatingMatch, startMatch,
+  selectedMatch, copyShareLink, navigate, error,
+}: Props) {
+  const selectedCount = selectedAgentIds.length;
+
+  function getColorIdx(agentId: number) {
+    const i = selectedAgentIds.indexOf(agentId);
+    return i >= 0 ? i % PLAYER_COLORS.length : -1;
+  }
+
+  function getMetric(agentId: number): AgentMetric | undefined {
+    return metrics.find(m => Number(m.agentId) === agentId);
+  }
+
+  const events = selectedMatch ? [...selectedMatch.events].reverse().slice(0, 24) : [];
+
+  return (
+    <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>
+      {error && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 8, marginBottom: 20,
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+          color: '#fca5a5', fontSize: 13,
+        }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'clamp(260px, 280px, 300px) 1fr',
+        gap: 16, alignItems: 'start',
+      }}>
+        {/* ── Left sidebar ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Game type */}
+          <div style={{
+            background: '#0d1827', border: '1px solid #1a2e47',
+            borderRadius: 12, padding: 16,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#d97706', letterSpacing: '0.1em', marginBottom: 10 }}>
+              GAME TYPE
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {['all', ...gameTypes].map((type) => {
+                const label = type === 'all'
+                  ? 'Default'
+                  : type.replace('catan-', '').split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+                const active = selectedType === type;
+                return (
+                  <button key={type} onClick={() => onTypeChange(type)} style={{
+                    padding: '7px 10px', borderRadius: 7, fontSize: 13,
+                    fontWeight: active ? 600 : 400, textAlign: 'left',
+                    border: active ? '1px solid rgba(217,119,6,0.45)' : '1px solid transparent',
+                    background: active ? 'rgba(217,119,6,0.1)' : 'transparent',
+                    color: active ? '#f59e0b' : '#64748b',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Agent selector */}
+          <div style={{
+            background: '#0d1827', border: '1px solid #1a2e47',
+            borderRadius: 12, padding: 16,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#d97706', letterSpacing: '0.1em', marginBottom: 4 }}>
+              PLAYERS
+            </div>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>
+              {selectedCount < 2
+                ? `Select at least ${2 - selectedCount} more`
+                : `${selectedCount} of ${agents.length} selected`}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {agents.map((agent, agentIdx) => {
+                const colorIdx = getColorIdx(agent.id);
+                const selected = colorIdx >= 0;
+                const color = PLAYER_COLORS[selected ? colorIdx : agentIdx % PLAYER_COLORS.length];
+                const metric = getMetric(agent.id);
+                return (
+                  <button key={agent.id} onClick={() => toggleAgent(agent.id)} style={{
+                    padding: '9px 10px', borderRadius: 8, textAlign: 'left',
+                    border: selected ? `1px solid ${color.hex}55` : '1px solid #1a2e47',
+                    background: selected ? color.bg : 'transparent',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+                        background: selected ? color.hex : '#243d5a',
+                        transition: 'background 0.15s',
+                      }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: 13, fontWeight: 600, lineHeight: 1.3,
+                          color: selected ? '#f1f5f9' : '#64748b',
+                        }}>
+                          {agent.name}
+                        </div>
+                        {agent.description && (
+                          <div style={{
+                            fontSize: 11, color: '#475569', lineHeight: 1.3,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {agent.description}
+                          </div>
+                        )}
+                        {metric && metric.gamesPlayed > 0 && (
+                          <div style={{ fontSize: 10, color: '#334155', marginTop: 2 }}>
+                            {metric.wins}W/{metric.gamesPlayed}G · {Math.round(metric.winRate * 100)}% WR
+                          </div>
+                        )}
+                      </div>
+                      {selected && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700,
+                          color: color.hex, flexShrink: 0, letterSpacing: '0.04em',
+                        }}>
+                          P{colorIdx + 1}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => void startMatch()}
+              disabled={isCreatingMatch || selectedCount < 2}
+              style={{
+                marginTop: 14, width: '100%', padding: '10px', borderRadius: 8,
+                fontSize: 14, fontWeight: 600, border: 'none',
+                cursor: isCreatingMatch || selectedCount < 2 ? 'not-allowed' : 'pointer',
+                background: isCreatingMatch || selectedCount < 2
+                  ? 'rgba(217,119,6,0.1)'
+                  : 'linear-gradient(135deg, #d97706, #b45309)',
+                color: isCreatingMatch || selectedCount < 2 ? '#7c4a00' : 'white',
+                transition: 'all 0.15s',
+                letterSpacing: '0.03em',
+              }}
+            >
+              {isCreatingMatch ? 'Starting…' : 'Start Match'}
+            </button>
+          </div>
+        </div>
+
+        {/* ── Right: live match ── */}
+        <div className="fade-up">
+          {!selectedMatch ? (
+            <div style={{
+              background: '#0d1827', border: '1px dashed #1a2e47',
+              borderRadius: 12, padding: '60px 24px', textAlign: 'center',
+            }}>
+              <div style={{
+                width: 52, height: 52, margin: '0 auto 14px',
+                background: 'rgba(217,119,6,0.08)', borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 22,
+              }}>⬡</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                No active match
+              </div>
+              <div style={{ fontSize: 13, color: '#243d5a' }}>
+                Select at least 2 agents and click Start Match
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              background: '#0d1827', border: '1px solid #1a2e47',
+              borderRadius: 12, overflow: 'hidden',
+            }}>
+              {/* Match header */}
+              <div style={{
+                padding: '12px 18px', borderBottom: '1px solid #1a2e47',
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                background: 'rgba(217,119,6,0.03)',
+              }}>
+                <span style={{
+                  padding: '2px 8px', borderRadius: 4,
+                  fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+                  background: 'rgba(217,119,6,0.12)', border: '1px solid rgba(217,119,6,0.3)',
+                  color: '#d97706', textTransform: 'uppercase',
+                }}>
+                  {selectedMatch.gameType}
+                </span>
+                <StatusBadge status={selectedMatch.status} />
+                {selectedMatch.winner && (
+                  <span style={{ color: '#eab308', fontSize: 13, fontWeight: 600 }}>
+                    🏆 {selectedMatch.winner}
+                  </span>
+                )}
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                  <button onClick={() => void copyShareLink()} style={{
+                    padding: '4px 10px', borderRadius: 6, fontSize: 12,
+                    border: '1px solid #1a2e47', background: 'transparent',
+                    color: '#64748b', cursor: 'pointer',
+                  }}>
+                    Share
+                  </button>
+                  <button onClick={() => navigate(`/matches/${selectedMatch.id}`)} style={{
+                    padding: '4px 10px', borderRadius: 6, fontSize: 12,
+                    border: '1px solid #1a2e47', background: 'transparent',
+                    color: '#64748b', cursor: 'pointer',
+                  }}>
+                    Detail →
+                  </button>
+                </div>
+              </div>
+
+              {/* Standings */}
+              <div style={{ padding: '16px 18px', borderBottom: '1px solid #1a2e47' }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color: '#334155',
+                  letterSpacing: '0.1em', marginBottom: 12,
+                }}>
+                  STANDINGS — {TARGET_SCORE} VP TO WIN
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[...selectedMatch.standings]
+                    .sort((a, b) => b.score - a.score)
+                    .map((entry, idx) => {
+                      const seatIdx = ((entry.seat ?? (idx + 1)) - 1) % PLAYER_COLORS.length;
+                      const color = PLAYER_COLORS[seatIdx];
+                      const isWinner = selectedMatch.winner === entry.name;
+                      const hasResources = entry.wood !== undefined;
+                      return (
+                        <div key={entry.agentId}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{
+                              width: 22, fontSize: 13, fontWeight: 700, flexShrink: 0,
+                              color: isWinner ? '#eab308' : '#334155',
+                            }}>
+                              {isWinner ? '🏆' : `#${idx + 1}`}
+                            </div>
+                            <div style={{
+                              width: 8, height: 8, borderRadius: '50%',
+                              background: color.hex, flexShrink: 0,
+                            }} />
+                            <div style={{
+                              fontSize: 13, fontWeight: 600, color: '#cbd5e1',
+                              width: 90, flexShrink: 0,
+                            }}>
+                              {entry.name}
+                            </div>
+                            <VPBar score={entry.score} color={color.hex} />
+                            <div style={{
+                              fontSize: 13, fontWeight: 700, color: color.hex,
+                              width: 52, textAlign: 'right', flexShrink: 0,
+                            }}>
+                              {entry.score}
+                              <span style={{ fontSize: 10, fontWeight: 400, color: '#334155' }}>/10</span>
+                            </div>
+                          </div>
+                          {hasResources && (
+                            <div style={{
+                              display: 'flex', gap: 6, paddingLeft: 40,
+                              marginTop: 4, flexWrap: 'wrap',
+                            }}>
+                              {([
+                                { key: 'wood',  icon: '🪵', val: entry.wood  ?? 0 },
+                                { key: 'brick', icon: '🧱', val: entry.brick ?? 0 },
+                                { key: 'ore',   icon: '⛏️', val: entry.ore   ?? 0 },
+                                { key: 'wheat', icon: '🌾', val: entry.wheat ?? 0 },
+                                { key: 'sheep', icon: '🐑', val: entry.sheep ?? 0 },
+                              ] as const).map(({ key, icon, val }) => (
+                                <span key={key} style={{
+                                  fontSize: 10, color: val > 0 ? '#94a3b8' : '#1e3a5f',
+                                  display: 'inline-flex', alignItems: 'center', gap: 2,
+                                }}>
+                                  {icon} {val}
+                                </span>
+                              ))}
+                              <span style={{ fontSize: 10, color: '#334155', marginLeft: 4 }}>
+                                🏠{entry.settlements ?? 2} 🏙️{entry.cities ?? 0} 🛤️{entry.roads ?? 0}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Event feed */}
+              <div style={{ padding: '14px 18px' }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color: '#334155',
+                  letterSpacing: '0.1em', marginBottom: 10,
+                }}>
+                  LIVE EVENTS
+                </div>
+                <div className="scroll-feed" style={{
+                  maxHeight: 280, overflowY: 'auto',
+                  display: 'flex', flexDirection: 'column', gap: 3,
+                }}>
+                  {events.map((ev) => {
+                    const s = EVENT_STYLES[ev.type] ?? EVENT_STYLES['COMMENTARY'];
+                    return (
+                      <div key={ev.id} style={{
+                        display: 'flex', gap: 8, padding: '5px 8px', borderRadius: 5,
+                        background: 'rgba(255,255,255,0.018)',
+                        borderLeft: `2px solid ${s.color}35`,
+                        fontSize: 12, lineHeight: 1.5,
+                      }}>
+                        <span style={{
+                          fontFamily: 'monospace', fontSize: 10,
+                          color: '#334155', flexShrink: 0, paddingTop: 1, width: 28,
+                        }}>
+                          T{ev.turn}
+                        </span>
+                        <span style={{
+                          color: s.color, fontSize: 9, fontWeight: 700,
+                          letterSpacing: '0.07em', flexShrink: 0,
+                          paddingTop: 2, width: 32,
+                        }}>
+                          {s.label}
+                        </span>
+                        <span style={{ color: '#94a3b8' }}>
+                          {ev.actor && <span style={{ color: '#cbd5e1', fontWeight: 600 }}>{ev.actor}: </span>}
+                          {ev.text}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
