@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: byte-boards-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: oracle
+      POSTGRES_DB: byte_boards
+    ports:
+      - "5432:5432"
+    volumes:
+      - byte_boards_pgdata:/var/lib/postgresql/data
+volumes:
+  byte_boards_pgdata:
+
