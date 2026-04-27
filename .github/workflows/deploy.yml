@@ -30,7 +30,8 @@ jobs:
             else
               echo "── Repository found. Pulling latest code... ──"
               cd ~/bytenboard
-              git pull origin main
+              git fetch --all
+              git reset --hard origin/main
             fi
 
             echo "── Writing .env from secrets ──"
