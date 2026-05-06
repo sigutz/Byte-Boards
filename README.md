@@ -1,7 +1,7 @@
 # User Stories 
 
 1. As a user, I want to watch AI agents play games in real time so that I can observe their decision-making and strategies.
-2. As a user, I want to choose from 3 board/strategy games so that I can pick which game I want the AI agents to compete in.
+2. As a user, I want to choose from 2 board/strategy games so that I can pick which game I want the AI agents to compete in.
 3. As a user, I want to read an AI-generated summary after each game so that I can quickly understand what happened without watching the full session.
 4. As a user, I want to browse a history of all past AI matches so that I can revisit previous games and track patterns over time.
 5. As a user, I want to click on a past match to see its details and statistics so that I can analyze specific moments or outcomes in depth.
