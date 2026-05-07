@@ -1,31 +1,23 @@
+# ~/bytenboard/docker-compose.yml
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: byte_boards_backend
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    env_file:
-      - ./backend/.env
-    environment:
-      NODE_ENV: production
-    networks:
-      - byte_boards_net
-
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: bytenboard-frontend
     container_name: byte_boards_frontend
     restart: unless-stopped
     ports:
       - "5173:80"
-    depends_on:
-      - backend
+
+  backend:
+    image: bytenboard-backend
+    container_name: byte_boards_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3003:3000" 
     networks:
-      - byte_boards_net 
+      - global-db-net
+
 networks:
-  byte_boards_net:
+  global-db-net:
     external: true
