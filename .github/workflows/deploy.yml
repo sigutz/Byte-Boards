@@ -15,11 +15,13 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: DATABASE_URL
+          envs: DATABASE_URL,JWT_SECRET,VITE_API_BASE_URL
           script: |
             set -e
 
@@ -35,7 +37,7 @@ jobs:
             fi
 
             echo "── Writing .env from secrets ──"
-            echo "DATABASE_URL=$DATABASE_URL" > .env
+            printf "DATABASE_URL=%s\nJWT_SECRET=%s\nVITE_API_BASE_URL=%s\n" "$DATABASE_URL" "$JWT_SECRET" "$VITE_API_BASE_URL" > .env
 
             echo "── Bringing down old containers ──"
             docker compose down --remove-orphans

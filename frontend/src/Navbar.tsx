@@ -1,8 +1,9 @@
+import { useAuth } from './context/AuthContext';
+
 const navLinks = [
   { label: 'Dashboard',   path: '/' },
   { label: 'History',     path: '/history' },
   { label: 'Performance', path: '/performance' },
-  { label: 'Users',       path: '/users' },
 ];
 
 interface NavbarProps {
@@ -11,10 +12,19 @@ interface NavbarProps {
 }
 
 export default function Navbar({ currentPath, navigate }: NavbarProps) {
+  const { user, isAdmin, logout } = useAuth();
+
   function isActive(path: string) {
-    if (path === '/') return !navLinks.slice(1).some(l => currentPath.startsWith(l.path));
+    if (path === '/') return !navLinks.slice(1).some(l => currentPath.startsWith(l.path)) && !currentPath.startsWith('/users');
     return currentPath.startsWith(path);
   }
+
+  function handleLogout() {
+    logout();
+    navigate('/');
+  }
+
+  const links = isAdmin ? [...navLinks, { label: 'Users', path: '/users' }] : navLinks;
 
   return (
     <header style={{
@@ -62,7 +72,7 @@ export default function Navbar({ currentPath, navigate }: NavbarProps) {
 
         {/* Nav links */}
         <nav style={{ display: 'flex', gap: 2 }}>
-          {navLinks.map(({ label, path }) => {
+          {links.map(({ label, path }) => {
             const active = isActive(path);
             return (
               <button
@@ -82,6 +92,37 @@ export default function Navbar({ currentPath, navigate }: NavbarProps) {
             );
           })}
         </nav>
+
+        {/* User info */}
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 16 }}>
+            {isAdmin && (
+              <span style={{
+                padding: '2px 8px', borderRadius: 4,
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                color: '#f87171', textTransform: 'uppercase',
+              }}>
+                Admin
+              </span>
+            )}
+            <span style={{ fontSize: 13, color: '#475569', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.name ?? user.email}
+            </span>
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: '5px 12px', borderRadius: 6,
+                fontSize: 12, fontWeight: 500,
+                border: '1px solid #1a2e47', background: 'transparent',
+                color: '#64748b', cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

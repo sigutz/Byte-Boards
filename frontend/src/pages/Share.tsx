@@ -4,9 +4,10 @@ interface Props {
   shareData: SharePayload | null;
   error: string;
   navigate: (path: string) => void;
+  invitedBy?: string;
 }
 
-export default function Share({ shareData, error, navigate }: Props) {
+export default function Share({ shareData, error, navigate, invitedBy }: Props) {
   return (
     <div style={{ maxWidth: 560, margin: '60px auto', padding: '0 24px', textAlign: 'center' }}>
       <div style={{
@@ -16,9 +17,16 @@ export default function Share({ shareData, error, navigate }: Props) {
       }}>
         ⬡
       </div>
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#d97706', letterSpacing: '0.1em', marginBottom: 6 }}>
-        SHARED MATCH
-      </div>
+
+      {invitedBy ? (
+        <div style={{ fontSize: 16, fontWeight: 600, color: '#e2e8f0', marginBottom: 6 }}>
+          <span style={{ color: '#f59e0b' }}>{invitedBy}</span> has invited you to a match
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#d97706', letterSpacing: '0.1em', marginBottom: 6 }}>
+          SHARED MATCH
+        </div>
+      )}
 
       {error && (
         <div style={{

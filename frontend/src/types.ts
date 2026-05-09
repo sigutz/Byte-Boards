@@ -1,13 +1,14 @@
 export type MatchListItem = {
   id: string;
   gameType: string;
-  status: 'LIVE' | 'COMPLETED';
+  status: 'LIVE' | 'PAUSED' | 'COMPLETED';
   createdAt: string;
   endedAt: string | null;
   winner: string | null;
   summary: string | null;
   players: string[];
   shareUrl: string;
+  createdBy: string | null;
 };
 
 export type Standing = {
@@ -39,7 +40,7 @@ export type MatchEvent = {
 export type MatchDetail = {
   id: string;
   gameType: string;
-  status: 'LIVE' | 'COMPLETED';
+  status: 'LIVE' | 'PAUSED' | 'COMPLETED';
   createdAt: string;
   endedAt: string | null;
   winner: string | null;
@@ -76,6 +77,8 @@ export type User = {
   id: number;
   name: string | null;
   email: string;
+  role: 'USER' | 'ADMIN';
+  createdAt?: string;
 };
 
 // Traditional Catan player colors
@@ -92,11 +95,24 @@ export const EVENT_STYLES: Record<string, { color: string; label: string }> = {
   RESULT:      { color: '#eab308', label: 'END'  },
 };
 
-export const TARGET_SCORE = 10;
+export const TARGET_SCORE = 8;
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
-export async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+// Per-tab in-memory token — not read from localStorage on every call, so
+// another tab logging in as a different user cannot corrupt this tab's requests.
+let _activeToken: string | null = localStorage.getItem('bb_token');
+export function setActiveToken(t: string | null) { _activeToken = t; }
+
+export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = _activeToken;
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (options?.body && typeof options.body === 'string') headers['Content-Type'] = 'application/json';
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { ...headers, ...(options?.headers as Record<string, string> | undefined) },
+  });
   if (!res.ok) throw new Error(`API error: ${path}`);
   return res.json() as Promise<T>;
 }

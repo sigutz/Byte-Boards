@@ -1,9 +1,11 @@
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient, MatchStatus, EventType } from '@prisma/client';
+import { PrismaClient, MatchStatus, EventType, Role } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import type { PlayerState } from './game/catan';
 import {
@@ -11,6 +13,39 @@ import {
   applyAction, computeVP, handleRobber, totalResources,
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
+
+const JWT_SECRET = process.env.JWT_SECRET ?? 'byte-boards-secret-change-in-production';
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: { id: number; email: string; role: string };
+    }
+  }
+}
+
+function authenticate(req: Request, res: Response, next: NextFunction) {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  try {
+    const token = auth.slice(7);
+    req.user = jwt.verify(token, JWT_SECRET) as { id: number; email: string; role: string };
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.user?.role !== Role.ADMIN) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  next();
+}
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -29,7 +64,8 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-const TARGET_SCORE = 10;
+const TARGET_SCORE = 8;
+const MAX_TURNS = 500;
 const GAME_TYPES = ['catan-classic', 'catan-seafarers'];
 const DEFAULT_AGENTS = [
   { name: 'HexaMind', description: 'Expansion-focused strategic planner' },
@@ -38,6 +74,7 @@ const DEFAULT_AGENTS = [
   { name: 'SheepBaron', description: 'Development card and resource hoarder' }
 ];
 const liveMatchJobs = new Set<string>();
+const pausedMatchJobs = new Set<string>();
 const sseSubscribers = new Map<string, Set<Response>>();
 
 type MatchWithDetails = Awaited<ReturnType<typeof getMatchWithDetails>>;
@@ -124,28 +161,49 @@ async function runMatchSimulation(matchId: string): Promise<void> {
     const match = await getMatchWithDetails(matchId);
     if (!match || match.status !== MatchStatus.LIVE) return;
 
-    // Build in-memory player states
+    // Build in-memory player states — restore from DB if game already started
     const stateMap = new Map<number, PlayerState>();
+    const isResume = match.agents.some(e => (e.tiles as unknown[]).length > 0);
+
     for (const entry of match.agents) {
-      const tiles = createStartingTiles();
-      const state: PlayerState = {
-        agentId: entry.agentId,
-        name: entry.agent.name,
-        wood: 0, brick: 0, ore: 0, wheat: 0, sheep: 0,
-        roads: 0, settlements: 2, cities: 0,
-        tiles,
-      };
-      stateMap.set(entry.agentId, state);
-      // Persist initial tile layout
-      await prisma.matchAgent.update({
-        where: { matchId_agentId: { matchId, agentId: entry.agentId } },
-        data: { settlements: 2, score: 2, tiles: tiles as unknown as Prisma.InputJsonValue },
-      });
+      if (isResume) {
+        stateMap.set(entry.agentId, {
+          agentId: entry.agentId,
+          name: entry.agent.name,
+          wood: entry.wood, brick: entry.brick, ore: entry.ore,
+          wheat: entry.wheat, sheep: entry.sheep,
+          roads: entry.roads, settlements: entry.settlements, cities: entry.cities,
+          tiles: entry.tiles as unknown as import('./game/catan').Tile[],
+        });
+      } else {
+        const tiles = createStartingTiles();
+        stateMap.set(entry.agentId, {
+          agentId: entry.agentId,
+          name: entry.agent.name,
+          wood: 0, brick: 0, ore: 0, wheat: 0, sheep: 0,
+          roads: 0, settlements: 2, cities: 0,
+          tiles,
+        });
+        await prisma.matchAgent.update({
+          where: { matchId_agentId: { matchId, agentId: entry.agentId } },
+          data: { settlements: 2, score: 2, tiles: tiles as unknown as Prisma.InputJsonValue },
+        });
+      }
     }
 
-    let turn = 1;
+    const lastEvent = await prisma.matchEvent.findFirst({
+      where: { matchId },
+      orderBy: { turn: 'desc' },
+    });
+    let turn = isResume ? (lastEvent?.turn ?? 0) + 1 : 1;
 
     while (true) {
+      while (pausedMatchJobs.has(matchId)) {
+        await new Promise<void>(resolve => setTimeout(resolve, 500));
+      }
+      const current = await prisma.match.findUnique({ where: { id: matchId }, select: { status: true } });
+      if (!current || current.status === MatchStatus.COMPLETED) return;
+
       const [d1, d2] = rollDice();
       const total = d1 + d2;
 
@@ -257,6 +315,37 @@ async function runMatchSimulation(matchId: string): Promise<void> {
       }
 
       turn += 1;
+
+      if (turn > MAX_TURNS) {
+        const allAgents = await prisma.matchAgent.findMany({
+          where: { matchId }, include: { agent: true },
+        });
+        const sorted = [...allAgents].sort((a, b) => b.score - a.score || a.seat - b.seat);
+        for (let i = 0; i < sorted.length; i++) {
+          await prisma.matchAgent.update({
+            where: { matchId_agentId: { matchId, agentId: sorted[i].agentId } },
+            data: { position: i + 1 },
+          });
+        }
+        const winner = sorted[0];
+        await appendEvent({
+          matchId, turn, type: EventType.RESULT, actorId: winner.agentId,
+          text: `Turn limit reached. ${winner.agent.name} wins with ${winner.score} VP!`,
+        });
+        await prisma.match.update({
+          where: { id: matchId },
+          data: { status: MatchStatus.COMPLETED, endedAt: new Date(), winnerId: winner.agentId },
+        });
+        const completed = await getMatchWithDetails(matchId);
+        if (completed) {
+          await prisma.match.update({
+            where: { id: matchId },
+            data: { summary: buildAutoSummary(completed) },
+          });
+        }
+        publishSse(matchId, { kind: 'completed', matchId });
+        return;
+      }
     }
   } catch (error) {
     console.error(`Simulation failed for match ${matchId}:`, error);
@@ -269,6 +358,58 @@ async function runMatchSimulation(matchId: string): Promise<void> {
   }
 }
 
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { email, password, name } = req.body as { email?: string; password?: string; name?: string };
+    if (!email || !password) {
+      res.status(400).json({ error: 'Email and password are required' });
+      return;
+    }
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(409).json({ error: 'Email already in use' });
+      return;
+    }
+    const hashed = await bcrypt.hash(password, 12);
+    const user = await prisma.user.create({ data: { email, password: hashed, name: name ?? null } });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body as { email?: string; password?: string };
+    if (!email || !password) {
+      res.status(400).json({ error: 'Email and password are required' });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/auth/me', authenticate, async (req: Request, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+    res.json({ id: user.id, email: user.email, name: user.name, role: user.role });
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.get('/users', async (req: Request, res: Response) => {
   try {
     const users = await prisma.user.findMany();
@@ -279,12 +420,46 @@ app.get('/users', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/users', async (req: Request, res: Response) => {
+app.get('/api/users', authenticate, requireAdmin, async (req: Request, res: Response) => {
   try {
-    const users = await prisma.user.findMany();
+    const users = await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, createdAt: true } });
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.delete('/api/users/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(readParam(req.params.id) ?? '');
+    if (!id) { res.status(400).json({ error: 'Invalid user id' }); return; }
+    if (id === req.user!.id) { res.status(400).json({ error: 'Cannot delete your own account' }); return; }
+    await prisma.user.delete({ where: { id } });
+    res.status(204).end();
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.delete('/api/agents/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(readParam(req.params.id) ?? '');
+    if (!id) { res.status(400).json({ error: 'Invalid agent id' }); return; }
+    await prisma.agent.delete({ where: { id } });
+    res.status(204).end();
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.delete('/api/matches/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const matchId = readParam(req.params.id);
+    if (!matchId) { res.status(400).json({ error: 'Invalid match id' }); return; }
+    await prisma.match.delete({ where: { id: matchId } });
+    res.status(204).end();
+  } catch {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -310,11 +485,28 @@ app.get('/api/agents', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/agents/metrics', async (req: Request, res: Response) => {
+app.get('/api/agents/metrics', authenticate, async (req: Request, res: Response) => {
   try {
+    const shareIds = typeof req.query.shareIds === 'string'
+      ? req.query.shareIds.split(',').filter(Boolean)
+      : [];
+    const isAdmin = req.user!.role === Role.ADMIN;
+
+    const matchFilter = isAdmin
+      ? undefined
+      : {
+          match: {
+            OR: [
+              { createdById: req.user!.id },
+              ...(shareIds.length > 0 ? [{ id: { in: shareIds } }] : []),
+            ],
+          },
+        };
+
     const agents = await prisma.agent.findMany({
       include: {
         matches: {
+          where: matchFilter,
           include: { match: true }
         }
       }
@@ -349,6 +541,12 @@ app.post('/api/matches', async (req: Request, res: Response) => {
     const gameType = GAME_TYPES.includes(requestedType) ? requestedType : GAME_TYPES[0];
     const selectedAgentIds = Array.isArray(req.body?.agentIds) ? req.body.agentIds.map(Number).filter(Number.isFinite) : [];
 
+    let creatorId: number | undefined;
+    const auth = req.headers.authorization;
+    if (auth?.startsWith('Bearer ')) {
+      try { creatorId = (jwt.verify(auth.slice(7), JWT_SECRET) as { id: number }).id; } catch { /* no user */ }
+    }
+
     await seedAgentsIfNeeded();
     const allAgents = await prisma.agent.findMany({ orderBy: { id: 'asc' } });
     const chosen = selectedAgentIds.length >= 2
@@ -364,6 +562,7 @@ app.post('/api/matches', async (req: Request, res: Response) => {
         gameType,
         status: MatchStatus.LIVE,
         startedAt: new Date(),
+        createdById: creatorId,
         agents: {
           create: chosen.map((agent, idx) => ({
             agentId: agent.id,
@@ -390,14 +589,30 @@ app.post('/api/matches', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/matches', async (req: Request, res: Response) => {
+app.get('/api/matches', authenticate, async (req: Request, res: Response) => {
   try {
     const gameType = typeof req.query.gameType === 'string' ? req.query.gameType : undefined;
+    const shareIds = typeof req.query.shareIds === 'string'
+      ? req.query.shareIds.split(',').filter(Boolean)
+      : [];
+    const isAdmin = req.user!.role === Role.ADMIN;
+
+    const where = isAdmin
+      ? (gameType ? { gameType } : undefined)
+      : {
+          ...(gameType ? { gameType } : {}),
+          OR: [
+            { createdById: req.user!.id },
+            ...(shareIds.length > 0 ? [{ id: { in: shareIds } }] : []),
+          ],
+        };
+
     const matches = await prisma.match.findMany({
-      where: gameType ? { gameType } : undefined,
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
         winner: true,
+        createdBy: true,
         agents: { include: { agent: true }, orderBy: { seat: 'asc' } }
       }
     });
@@ -412,7 +627,8 @@ app.get('/api/matches', async (req: Request, res: Response) => {
       winner: match.winner?.name ?? null,
       summary: match.summary,
       shareUrl: `/matches/${match.id}?share=${match.shareToken}`,
-      players: match.agents.map((entry) => entry.agent.name)
+      players: match.agents.map((entry) => entry.agent.name),
+      createdBy: match.createdBy?.name ?? match.createdBy?.email ?? null,
     })));
   } catch (error) {
     console.error('Error fetching matches:', error);
@@ -532,9 +748,54 @@ app.get('/api/matches/share/:shareToken', async (req: Request, res: Response) =>
   }
 });
 
+app.post('/api/matches/:id/pause', authenticate, async (req: Request, res: Response) => {
+  try {
+    const matchId = readParam(req.params.id);
+    if (!matchId) { res.status(400).json({ error: 'Invalid match id' }); return; }
+    const match = await prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) { res.status(404).json({ error: 'Match not found' }); return; }
+    if (match.status !== MatchStatus.LIVE) { res.status(400).json({ error: 'Match is not live' }); return; }
+    pausedMatchJobs.add(matchId);
+    await prisma.match.update({ where: { id: matchId }, data: { status: MatchStatus.PAUSED } });
+    publishSse(matchId, { kind: 'paused', matchId });
+    res.json({ status: 'PAUSED' });
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/matches/:id/resume', authenticate, async (req: Request, res: Response) => {
+  try {
+    const matchId = readParam(req.params.id);
+    if (!matchId) { res.status(400).json({ error: 'Invalid match id' }); return; }
+    const match = await prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) { res.status(404).json({ error: 'Match not found' }); return; }
+    if (match.status !== MatchStatus.PAUSED) { res.status(400).json({ error: 'Match is not paused' }); return; }
+    await prisma.match.update({ where: { id: matchId }, data: { status: MatchStatus.LIVE } });
+    if (pausedMatchJobs.has(matchId)) {
+      // Simulation loop is still in memory, just unblock it
+      pausedMatchJobs.delete(matchId);
+    } else {
+      // Loop was lost (e.g. server restart), restart it from DB state
+      void runMatchSimulation(matchId);
+    }
+    publishSse(matchId, { kind: 'resumed', matchId });
+    res.json({ status: 'LIVE' });
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   seedAgentsIfNeeded().catch((error) => {
     console.error('Failed to seed agents:', error);
+  });
+  prisma.match.findMany({ where: { status: MatchStatus.LIVE } }).then((liveMatches) => {
+    for (const match of liveMatches) {
+      void runMatchSimulation(match.id);
+    }
+  }).catch((error) => {
+    console.error('Failed to resume live matches on startup:', error);
   });
 });

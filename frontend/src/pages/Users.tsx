@@ -2,6 +2,8 @@ import type { User } from '../types';
 
 interface Props {
   users: User[];
+  onDeleteUser: (id: number) => void;
+  currentUserId: number;
 }
 
 function initials(user: User): string {
@@ -11,7 +13,7 @@ function initials(user: User): string {
   return user.email[0].toUpperCase();
 }
 
-export default function Users({ users }: Props) {
+export default function Users({ users, onDeleteUser, currentUserId }: Props) {
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '24px' }}>
       <div style={{ marginBottom: 20 }}>
@@ -45,15 +47,42 @@ export default function Users({ users }: Props) {
               {initials(user)}
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#e2e8f0' }}>
-                {user.name ?? '—'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#e2e8f0' }}>
+                  {user.name ?? '—'}
+                </div>
+                <span style={{
+                  padding: '1px 6px', borderRadius: 4,
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                  background: user.role === 'ADMIN' ? 'rgba(239,68,68,0.1)' : 'rgba(100,116,139,0.1)',
+                  border: user.role === 'ADMIN' ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(100,116,139,0.2)',
+                  color: user.role === 'ADMIN' ? '#f87171' : '#64748b',
+                }}>
+                  {user.role}
+                </span>
               </div>
               <div style={{ fontSize: 12, color: '#475569' }}>
                 {user.email}
               </div>
             </div>
-            <div style={{ marginLeft: 'auto', fontSize: 11, color: '#243d5a' }}>
-              #{user.id}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 11, color: '#243d5a' }}>#{user.id}</span>
+              {user.id !== currentUserId && (
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete user ${user.email}?`)) onDeleteUser(user.id);
+                  }}
+                  style={{
+                    padding: '4px 10px', borderRadius: 6, fontSize: 12,
+                    border: '1px solid rgba(239,68,68,0.25)',
+                    background: 'rgba(239,68,68,0.06)',
+                    color: '#f87171', cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  Delete
+                </button>
+              )}
             </div>
           </div>
         ))}

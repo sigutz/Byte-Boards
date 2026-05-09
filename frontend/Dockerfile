@@ -12,6 +12,9 @@ COPY vite.config.ts ./
 COPY src ./src
 COPY public ./public
 
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 # Build the static bundle
 RUN npm run build
 
