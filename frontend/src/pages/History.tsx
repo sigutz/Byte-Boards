@@ -6,6 +6,9 @@ interface Props {
   gameTypes: string[];
   selectedType: string;
   onTypeChange: (t: string) => void;
+  onDeleteMatch?: (id: string) => void;
+  invitations: Record<string, string>; // matchId → invitedBy
+  currentUserName: string;
 }
 
 function formatDate(iso: string) {
@@ -15,7 +18,7 @@ function formatDate(iso: string) {
   });
 }
 
-export default function History({ matches, navigate, gameTypes, selectedType, onTypeChange }: Props) {
+export default function History({ matches, navigate, gameTypes, selectedType, onTypeChange, onDeleteMatch, invitations, currentUserName }: Props) {
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>
       {/* Filter bar */}
@@ -65,19 +68,46 @@ export default function History({ matches, navigate, gameTypes, selectedType, on
       }}>
         {matches.map(match => {
           const isLive = match.status === 'LIVE';
+          const isPaused = match.status === 'PAUSED';
+          const invitedBy = invitations[match.id];
+          const startedByYou = match.createdBy === currentUserName;
+          const startedByLabel = match.createdBy
+            ? (startedByYou ? 'Started by you' : `Started by ${match.createdBy}`)
+            : null;
           return (
-            <button
+            <div
               key={match.id}
-              onClick={() => navigate(`/matches/${match.id}`)}
               className="fade-up"
               style={{
                 background: '#0d1827',
-                border: `1px solid ${isLive ? 'rgba(34,197,94,0.25)' : '#1a2e47'}`,
-                borderRadius: 12, padding: '14px 16px',
-                cursor: 'pointer', textAlign: 'left',
+                border: `1px solid ${isLive ? 'rgba(34,197,94,0.25)' : isPaused ? 'rgba(234,179,8,0.25)' : '#1a2e47'}`,
+                borderRadius: 12, padding: '14px 16px', position: 'relative',
+                cursor: 'pointer',
                 transition: 'border-color 0.15s, background 0.15s',
               }}
+              onClick={() => navigate(`/matches/${match.id}`)}
             >
+              {/* Source badge */}
+              {invitedBy && (
+                <div style={{
+                  marginBottom: 8, padding: '3px 8px', borderRadius: 4,
+                  fontSize: 10, fontWeight: 600,
+                  background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.2)',
+                  color: '#d97706', display: 'inline-block',
+                }}>
+                  Invited by {invitedBy}
+                </div>
+              )}
+              {!invitedBy && startedByLabel && (
+                <div style={{
+                  marginBottom: 8, padding: '3px 8px', borderRadius: 4,
+                  fontSize: 10, fontWeight: 600,
+                  background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.2)',
+                  color: '#60a5fa', display: 'inline-block',
+                }}>
+                  {startedByLabel}
+                </div>
+              )}
               {/* Status + game type */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <span style={{
@@ -98,6 +128,10 @@ export default function History({ matches, navigate, gameTypes, selectedType, on
                       background: '#22c55e', display: 'inline-block',
                     }} />
                     LIVE
+                  </span>
+                ) : isPaused ? (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#eab308' }}>
+                    ⏸ PAUSED
                   </span>
                 ) : (
                   <span style={{ fontSize: 10, fontWeight: 600, color: '#334155' }}>
@@ -131,11 +165,29 @@ export default function History({ matches, navigate, gameTypes, selectedType, on
                 </div>
               )}
 
-              {/* Date */}
-              <div style={{ fontSize: 11, color: '#334155' }}>
-                {formatDate(match.createdAt)}
+              {/* Date + delete */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 11, color: '#334155' }}>
+                  {formatDate(match.createdAt)}
+                </div>
+                {onDeleteMatch && (
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (confirm('Delete this match?')) onDeleteMatch(match.id);
+                    }}
+                    style={{
+                      padding: '3px 8px', borderRadius: 5, fontSize: 11,
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      background: 'rgba(239,68,68,0.06)',
+                      color: '#f87171', cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

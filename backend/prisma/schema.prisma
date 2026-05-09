@@ -6,10 +6,19 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
 model User {
-  id    Int     @id @default(autoincrement())
-  name  String?
-  email String  @unique
+  id             Int     @id @default(autoincrement())
+  name           String?
+  email          String  @unique
+  password       String
+  role           Role     @default(USER)
+  createdAt      DateTime @default(now())
+  createdMatches Match[]  @relation("MatchCreator")
 }
 
 model Agent {
@@ -33,9 +42,11 @@ model Match {
   winnerId   Int?
   summary    String?
   shareToken String       @unique @default(cuid())
-  winner     Agent?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
-  agents     MatchAgent[]
-  events     MatchEvent[]
+  createdById Int?
+  winner      Agent?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  createdBy   User?        @relation("MatchCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  agents      MatchAgent[]
+  events      MatchEvent[]
 }
 
 model MatchAgent {
@@ -77,6 +88,7 @@ model MatchEvent {
 enum MatchStatus {
   PENDING
   LIVE
+  PAUSED
   COMPLETED
 }
 

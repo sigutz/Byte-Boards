@@ -5,6 +5,8 @@ interface Props {
   match: MatchDetailType | null;
   navigate: (path: string) => void;
   copyShareLink: () => void;
+  linkCopied?: boolean;
+  invitedBy?: string;
 }
 
 function VPBar({ score, color }: { score: number; color: string }) {
@@ -34,7 +36,7 @@ function splitSummary(summary: string | null) {
   };
 }
 
-export default function MatchDetailPage({ match, navigate, copyShareLink }: Props) {
+export default function MatchDetailPage({ match, navigate, copyShareLink, linkCopied, invitedBy }: Props) {
   if (!match) {
     return (
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px', textAlign: 'center', color: '#334155' }}>
@@ -49,6 +51,15 @@ export default function MatchDetailPage({ match, navigate, copyShareLink }: Prop
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px' }}>
+      {invitedBy && (
+        <div style={{
+          marginBottom: 16, padding: '10px 16px', borderRadius: 8,
+          background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.25)',
+          fontSize: 13, color: '#94a3b8',
+        }}>
+          <span style={{ color: '#f59e0b', fontWeight: 600 }}>{invitedBy}</span> has invited you to this match
+        </div>
+      )}
       {/* Back */}
       <button
         onClick={() => navigate('/history')}
@@ -108,9 +119,9 @@ export default function MatchDetailPage({ match, navigate, copyShareLink }: Prop
           <button onClick={() => void copyShareLink()} style={{
             padding: '5px 12px', borderRadius: 6, fontSize: 12,
             border: '1px solid #1a2e47', background: 'transparent',
-            color: '#64748b', cursor: 'pointer',
+            color: linkCopied ? '#22c55e' : '#64748b', cursor: 'pointer',
           }}>
-            Copy share link
+            {linkCopied ? 'Copied!' : 'Copy share link'}
           </button>
         </div>
       </div>

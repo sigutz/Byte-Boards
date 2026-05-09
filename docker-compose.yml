@@ -14,7 +14,7 @@ services:
     env_file:
       - .env
     ports:
-      - "3003:3000" 
+      - "3003:5000"
     networks:
       - global-db-net
 

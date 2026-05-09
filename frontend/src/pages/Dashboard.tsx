@@ -10,14 +10,17 @@ interface Props {
   selectedAgentIds: number[];
   toggleAgent: (id: number) => void;
   isCreatingMatch: boolean;
+  hasLiveMatch: boolean;
   startMatch: () => void;
+  onPauseResume: (matchId: string, action: 'pause' | 'resume') => void;
   selectedMatch: MatchDetail | null;
   copyShareLink: () => void;
+  linkCopied: boolean;
   navigate: (path: string) => void;
   error: string;
 }
 
-function StatusBadge({ status }: { status: 'LIVE' | 'COMPLETED' }) {
+function StatusBadge({ status }: { status: 'LIVE' | 'PAUSED' | 'COMPLETED' }) {
   if (status === 'LIVE') {
     return (
       <span style={{
@@ -32,6 +35,19 @@ function StatusBadge({ status }: { status: 'LIVE' | 'COMPLETED' }) {
           background: '#22c55e', flexShrink: 0, display: 'inline-block',
         }} />
         LIVE
+      </span>
+    );
+  }
+  if (status === 'PAUSED') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '3px 9px', borderRadius: 20,
+        fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+        background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.35)',
+        color: '#eab308',
+      }}>
+        ⏸ PAUSED
       </span>
     );
   }
@@ -67,8 +83,8 @@ function VPBar({ score, color }: { score: number; color: string }) {
 export default function Dashboard({
   gameTypes, selectedType, onTypeChange,
   agents, metrics, selectedAgentIds, toggleAgent,
-  isCreatingMatch, startMatch,
-  selectedMatch, copyShareLink, navigate, error,
+  isCreatingMatch, hasLiveMatch, startMatch, onPauseResume,
+  selectedMatch, copyShareLink, linkCopied, navigate, error,
 }: Props) {
   const selectedCount = selectedAgentIds.length;
 
@@ -202,20 +218,20 @@ export default function Dashboard({
 
             <button
               onClick={() => void startMatch()}
-              disabled={isCreatingMatch || selectedCount < 2}
+              disabled={isCreatingMatch || hasLiveMatch || selectedCount < 2}
               style={{
                 marginTop: 14, width: '100%', padding: '10px', borderRadius: 8,
                 fontSize: 14, fontWeight: 600, border: 'none',
-                cursor: isCreatingMatch || selectedCount < 2 ? 'not-allowed' : 'pointer',
-                background: isCreatingMatch || selectedCount < 2
+                cursor: isCreatingMatch || hasLiveMatch || selectedCount < 2 ? 'not-allowed' : 'pointer',
+                background: isCreatingMatch || hasLiveMatch || selectedCount < 2
                   ? 'rgba(217,119,6,0.1)'
                   : 'linear-gradient(135deg, #d97706, #b45309)',
-                color: isCreatingMatch || selectedCount < 2 ? '#7c4a00' : 'white',
+                color: isCreatingMatch || hasLiveMatch || selectedCount < 2 ? '#7c4a00' : 'white',
                 transition: 'all 0.15s',
                 letterSpacing: '0.03em',
               }}
             >
-              {isCreatingMatch ? 'Starting…' : 'Start Match'}
+              {isCreatingMatch ? 'Starting…' : hasLiveMatch ? 'Match in progress' : 'Start Match'}
             </button>
           </div>
         </div>
@@ -266,12 +282,25 @@ export default function Dashboard({
                   </span>
                 )}
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                  {(selectedMatch.status === 'LIVE' || selectedMatch.status === 'PAUSED') && (
+                    <button
+                      onClick={() => onPauseResume(selectedMatch.id, selectedMatch.status === 'LIVE' ? 'pause' : 'resume')}
+                      style={{
+                        padding: '4px 10px', borderRadius: 6, fontSize: 12,
+                        border: `1px solid ${selectedMatch.status === 'LIVE' ? 'rgba(234,179,8,0.4)' : 'rgba(34,197,94,0.4)'}`,
+                        background: 'transparent', cursor: 'pointer',
+                        color: selectedMatch.status === 'LIVE' ? '#eab308' : '#22c55e',
+                      }}
+                    >
+                      {selectedMatch.status === 'LIVE' ? '⏸ Pause' : '▶ Resume'}
+                    </button>
+                  )}
                   <button onClick={() => void copyShareLink()} style={{
                     padding: '4px 10px', borderRadius: 6, fontSize: 12,
                     border: '1px solid #1a2e47', background: 'transparent',
-                    color: '#64748b', cursor: 'pointer',
+                    color: linkCopied ? '#22c55e' : '#64748b', cursor: 'pointer',
                   }}>
-                    Share
+                    {linkCopied ? 'Copied!' : 'Share'}
                   </button>
                   <button onClick={() => navigate(`/matches/${selectedMatch.id}`)} style={{
                     padding: '4px 10px', borderRadius: 6, fontSize: 12,
@@ -324,7 +353,7 @@ export default function Dashboard({
                               width: 52, textAlign: 'right', flexShrink: 0,
                             }}>
                               {entry.score}
-                              <span style={{ fontSize: 10, fontWeight: 400, color: '#334155' }}>/10</span>
+                              <span style={{ fontSize: 10, fontWeight: 400, color: '#334155' }}>/{TARGET_SCORE}</span>
                             </div>
                           </div>
                           {hasResources && (
