@@ -11,7 +11,7 @@
 9. As a user, I want to see live AI-generated commentary while a game is being played so that the experience feels more engaging and dynamic.
 10. As a user, I want to share a match summary via a link so that I can show others interesting or notable AI game outcomes.
 
-## Local Setup
+## Local Setup da
 
 ### 1. Create the local database
 
