@@ -11,91 +11,72 @@
 9. As a user, I want to see live AI-generated commentary while a game is being played so that the experience feels more engaging and dynamic.
 10. As a user, I want to share a match summary via a link so that I can show others interesting or notable AI game outcomes.
 
-## Local Setup da
+## Local Setup
 
-### 1. Create the local database
-
-First, create a folder fot the database:
-```bash
-mkdir db
-cd db
-```
-
-Start a PostgreSQL database using Docker. Create a `docker-compose.yml` file:
-
-```yaml
-version: '3.8'
-
-services:
-  db:
-    image: postgres:latest
-    container_name: postgres-db
-    restart: always
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql
-
-volumes:
-  pgdata:
-```
-
-Then start the container:
+### 1. Clonează proiectul
 
 ```bash
-docker compose up -d --build
-```
-
----
-
-### 2. Clone the project
-
-```bash
-cd ..
 git clone https://github.com/sigutz/Byte-Boards.git
+cd Byte-Boards
 ```
 
 ---
 
-### 3. Configure the backend
+### 2. Configurează `.env`
 
-Go into the backend folder and create the `.env` file with the database URL:
+Creează fișierul `.env` în rădăcina proiectului:
 
 ```bash
-cd backend
-echo 'DATABASE_URL="postgresql://admin:oracle@host.docker.internal:5432/postgres?schema=public"' > .env
+cat > .env << 'EOF'
+DATABASE_URL="postgresql://admin:admin@db:5432/bytenboard?schema=public"
+JWT_SECRET="dev-secret-change-me"
+VITE_API_BASE_URL="http://localhost:3003"
+EOF
 ```
+
+> **De ce `db` ca hostname?** Backend-ul rulează în Docker și vede baza de date
+> prin numele serviciului `db` din `docker-compose.dev.yml`, nu prin `localhost`.
 
 ---
 
-### 4. Start the container app
+### 3. Pornește toate containerele
 
 ```bash
-cd ..
-docker compose up -d --build
+docker compose -f docker-compose.dev.yml up --build -d
 ```
+
+Aceasta pornește simultan: baza de date, backend-ul și frontend-ul.
+Backend-ul aşteaptă automat ca DB-ul să fie ready înainte să pornească.
 
 ---
 
-### 5. Access the app
-
-Open in your browser:
-
-```
-http://localhost:5173/
-```
-
----
-
-### 6. If you change the Prisma schema
-
-If you modify `schema.prisma`, run:
+### 4. Rulează migrările Prisma (prima dată sau după modificări de schemă)
 
 ```bash
-cd backend
-npx prisma migrate dev --name your_migration_name
+docker exec bytenboard-backend-dev npx prisma migrate dev --name init
+```
+
+---
+
+### 5. Accesează aplicația
+http://localhost:5173
+
+---
+
+### 6. Oprire și curățare
+
+```bash
+# Oprire (păstrează datele)
+docker compose -f docker-compose.dev.yml down
+
+# Oprire + șterge datele din DB
+docker compose -f docker-compose.dev.yml down -v
+```
+
+---
+
+### 7. Dacă modifici schema Prisma
+
+```bash
+docker exec bytenboard-backend-dev npx prisma migrate dev --name descriere_modificare
 ```
