@@ -96,7 +96,7 @@ export const EVENT_STYLES: Record<string, { color: string; label: string }> = {
 };
 
 export const TARGET_SCORE = 8;
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 // Per-tab in-memory token — not read from localStorage on every call, so
 // another tab logging in as a different user cannot corrupt this tab's requests.
