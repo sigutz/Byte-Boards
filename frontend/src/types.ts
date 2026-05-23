@@ -57,6 +57,7 @@ export type MatchDetail = {
   summary: string | null;
   shareToken: string;
   robberTile: number;
+  createdById: number | null;
   standings: Standing[];
   events: MatchEvent[];
 };

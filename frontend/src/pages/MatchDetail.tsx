@@ -9,6 +9,9 @@ interface Props {
   copyShareLink: () => void;
   linkCopied?: boolean;
   invitedBy?: string;
+  currentUserId?: number;
+  onStopMatch?: (id: string) => void;
+  onDeleteMatch?: (id: string) => void;
 }
 
 function PlayerResources({ standings, winner, events }: { standings: Standing[]; winner: string | null; events: MatchEvent[] }) {
@@ -304,7 +307,7 @@ function splitSummary(summary: string | null) {
   };
 }
 
-export default function MatchDetailPage({ match, navigate, copyShareLink, linkCopied, invitedBy }: Props) {
+export default function MatchDetailPage({ match, navigate, copyShareLink, linkCopied, invitedBy, currentUserId, onStopMatch, onDeleteMatch }: Props) {
   if (!match) {
     return (
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px', textAlign: 'center', color: '#334155' }}>
@@ -390,6 +393,30 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
           }}>
             {linkCopied ? 'Copied!' : 'Copy share link'}
           </button>
+          {currentUserId != null && match.createdById === currentUserId && isLive && onStopMatch && (
+            <button
+              onClick={() => { if (confirm('Stop this match?')) onStopMatch(match.id); }}
+              style={{
+                padding: '5px 12px', borderRadius: 6, fontSize: 12,
+                border: '1px solid rgba(234,179,8,0.3)', background: 'rgba(234,179,8,0.07)',
+                color: '#fbbf24', cursor: 'pointer',
+              }}
+            >
+              Stop
+            </button>
+          )}
+          {currentUserId != null && match.createdById === currentUserId && onDeleteMatch && (
+            <button
+              onClick={() => { if (confirm('Delete this match permanently?')) { onDeleteMatch(match.id); navigate('/history'); } }}
+              style={{
+                padding: '5px 12px', borderRadius: 6, fontSize: 12,
+                border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.06)',
+                color: '#f87171', cursor: 'pointer',
+              }}
+            >
+              Delete
+            </button>
+          )}
         </div>
       </div>
 

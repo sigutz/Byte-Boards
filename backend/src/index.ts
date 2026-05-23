@@ -699,12 +699,46 @@ app.delete('/api/agents/:id', authenticate, requireAdmin, async (req: Request, r
   }
 });
 
-app.delete('/api/matches/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+app.delete('/api/matches/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const matchId = readParam(req.params.id);
     if (!matchId) { res.status(400).json({ error: 'Invalid match id' }); return; }
+    const isAdmin = req.user!.role === Role.ADMIN;
+    if (!isAdmin) {
+      const m = await prisma.match.findUnique({ where: { id: matchId }, select: { createdById: true } });
+      if (!m) { res.status(404).json({ error: 'Match not found' }); return; }
+      if (m.createdById !== req.user!.id) { res.status(403).json({ error: 'Forbidden' }); return; }
+    }
+    // Stop simulation before deleting
+    pausedMatchJobs.add(matchId);
+    liveMatchJobs.delete(matchId);
     await prisma.match.delete({ where: { id: matchId } });
     res.status(204).end();
+  } catch {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/matches/:id/stop', authenticate, async (req: Request, res: Response) => {
+  try {
+    const matchId = readParam(req.params.id);
+    if (!matchId) { res.status(400).json({ error: 'Invalid match id' }); return; }
+    const match = await prisma.match.findUnique({ where: { id: matchId }, select: { status: true, createdById: true } });
+    if (!match) { res.status(404).json({ error: 'Match not found' }); return; }
+    const isAdmin = req.user!.role === Role.ADMIN;
+    const isCreator = match.createdById === req.user!.id;
+    if (!isAdmin && !isCreator) { res.status(403).json({ error: 'Forbidden' }); return; }
+    if (match.status === MatchStatus.COMPLETED) { res.status(400).json({ error: 'Match already completed' }); return; }
+    // Halt simulation
+    pausedMatchJobs.add(matchId);
+    liveMatchJobs.delete(matchId);
+    await prisma.match.update({ where: { id: matchId }, data: { status: MatchStatus.COMPLETED, endedAt: new Date() } });
+    const lastEvent = await prisma.matchEvent.findFirst({ where: { matchId }, orderBy: [{ turn: 'desc' }, { createdAt: 'desc' }] });
+    await prisma.matchEvent.create({
+      data: { matchId, turn: (lastEvent?.turn ?? 0) + 1, type: EventType.RESULT, text: 'Match stopped by the host.' },
+    });
+    publishSse(matchId, { kind: 'completed', matchId });
+    res.json({ status: 'COMPLETED' });
   } catch {
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -936,7 +970,7 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Match not found' });
     }
 
-    const matchRaw3 = match as unknown as { robberTile?: number };
+    const matchRaw3 = match as unknown as { robberTile?: number; createdById?: number | null };
     res.json({
       id: match.id,
       gameType: match.gameType,
@@ -948,6 +982,7 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       winner: match.winner?.name ?? null,
       shareToken: match.shareToken,
       robberTile: matchRaw3.robberTile ?? 9,
+      createdById: matchRaw3.createdById ?? null,
       standings: (() => {
         const matchRaw2 = match as unknown as { largestArmyHolder?: number | null; longestRoadHolder?: number | null };
         const largestArmyHolder = matchRaw2.largestArmyHolder ?? null;

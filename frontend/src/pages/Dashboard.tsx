@@ -328,20 +328,25 @@ export default function Dashboard({
             <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>
               {selectedCount < 2
                 ? `Select at least ${2 - selectedCount} more`
-                : `${selectedCount} of ${agents.length} selected`}
+                : selectedCount >= 4
+                  ? `${selectedCount} of 4 max selected`
+                  : `${selectedCount} selected (max 4)`}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {agents.map((agent, agentIdx) => {
                 const colorIdx = getColorIdx(agent.id);
                 const selected = colorIdx >= 0;
+                const maxed = selectedCount >= 4 && !selected;
                 const color = PLAYER_COLORS[selected ? colorIdx : agentIdx % PLAYER_COLORS.length];
                 const metric = getMetric(agent.id);
                 return (
-                  <button key={agent.id} onClick={() => toggleAgent(agent.id)} style={{
+                  <button key={agent.id} onClick={() => !maxed && toggleAgent(agent.id)} style={{
                     padding: '9px 10px', borderRadius: 8, textAlign: 'left',
                     border: selected ? `1px solid ${color.hex}55` : '1px solid #1a2e47',
                     background: selected ? color.bg : 'transparent',
-                    cursor: 'pointer', transition: 'all 0.15s',
+                    cursor: maxed ? 'not-allowed' : 'pointer',
+                    opacity: maxed ? 0.4 : 1,
+                    transition: 'all 0.15s',
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{

@@ -195,9 +195,19 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
   }
 
   function toggleAgent(agentId: number) {
-    setSelectedAgentIds(cur =>
-      cur.includes(agentId) ? cur.filter(id => id !== agentId) : [...cur, agentId]
-    );
+    setSelectedAgentIds(cur => {
+      if (cur.includes(agentId)) return cur.filter(id => id !== agentId);
+      if (cur.length >= 4) return cur;
+      return [...cur, agentId];
+    });
+  }
+
+  async function stopMatch(id: string) {
+    try {
+      await apiFetch(`/api/matches/${id}/stop`, { method: 'POST' });
+      await loadMatches();
+      if (selectedMatchId === id) void loadSelectedMatch(id);
+    } catch { setError('Could not stop match.'); }
   }
 
   // ── Effects ────────────────────────────────────────────────────────────────
@@ -265,6 +275,9 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
           copyShareLink={copyShareLink}
           linkCopied={linkCopied}
           invitedBy={invitedBy || undefined}
+          currentUserId={user.id}
+          onStopMatch={stopMatch}
+          onDeleteMatch={(id) => { deleteMatch(id); navigate('/history'); }}
         />
       )}
 
@@ -275,7 +288,8 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
           gameTypes={gameTypes}
           selectedType={selectedType}
           onTypeChange={setSelectedType}
-          onDeleteMatch={isAdmin ? deleteMatch : undefined}
+          onDeleteMatch={deleteMatch}
+          onStopMatch={stopMatch}
           invitations={invitations}
           currentUserName={user.name ?? user.email}
         />

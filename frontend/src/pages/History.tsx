@@ -7,6 +7,7 @@ interface Props {
   selectedType: string;
   onTypeChange: (t: string) => void;
   onDeleteMatch?: (id: string) => void;
+  onStopMatch?: (id: string) => void;
   invitations: Record<string, string>; // matchId → invitedBy
   currentUserName: string;
 }
@@ -18,7 +19,7 @@ function formatDate(iso: string) {
   });
 }
 
-export default function History({ matches, navigate, gameTypes, selectedType, onTypeChange, onDeleteMatch, invitations, currentUserName }: Props) {
+export default function History({ matches, navigate, gameTypes, selectedType, onTypeChange, onDeleteMatch, onStopMatch, invitations, currentUserName }: Props) {
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>
       {/* Filter bar */}
@@ -165,26 +166,46 @@ export default function History({ matches, navigate, gameTypes, selectedType, on
                 </div>
               )}
 
-              {/* Date + delete */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              {/* Date + actions */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                 <div style={{ fontSize: 11, color: '#334155' }}>
                   {formatDate(match.createdAt)}
                 </div>
-                {onDeleteMatch && (
-                  <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      if (confirm('Delete this match?')) onDeleteMatch(match.id);
-                    }}
-                    style={{
-                      padding: '3px 8px', borderRadius: 5, fontSize: 11,
-                      border: '1px solid rgba(239,68,68,0.25)',
-                      background: 'rgba(239,68,68,0.06)',
-                      color: '#f87171', cursor: 'pointer',
-                    }}
-                  >
-                    Delete
-                  </button>
+                {startedByYou && (
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    {onStopMatch && (isLive || isPaused) && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (confirm('Stop this match? It will be marked as completed.')) onStopMatch(match.id);
+                        }}
+                        style={{
+                          padding: '3px 8px', borderRadius: 5, fontSize: 11,
+                          border: '1px solid rgba(234,179,8,0.3)',
+                          background: 'rgba(234,179,8,0.07)',
+                          color: '#fbbf24', cursor: 'pointer',
+                        }}
+                      >
+                        Stop
+                      </button>
+                    )}
+                    {onDeleteMatch && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (confirm('Delete this match permanently?')) onDeleteMatch(match.id);
+                        }}
+                        style={{
+                          padding: '3px 8px', borderRadius: 5, fontSize: 11,
+                          border: '1px solid rgba(239,68,68,0.25)',
+                          background: 'rgba(239,68,68,0.06)',
+                          color: '#f87171', cursor: 'pointer',
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
