@@ -2,6 +2,7 @@ import { RESOURCES, computeVP, getValidActions } from './catan';
 import type { PlayerState, BoardOccupancy } from './catan';
 import { callGemini, hasGeminiKey } from './gemini-client';
 import { getAgentTraits, buildSystemPrompt } from './personality';
+import type { Trait } from './personality';
 
 export type AIDecision = {
   action: string;
@@ -12,6 +13,8 @@ export type RobberPayload = {
   eligibleTiles: number[];
   targets: { tile: number; players: { id: number; cards: number }[] }[];
 };
+
+export type KnightPayload = RobberPayload;
 
 type AIInput = {
   turn: number;
@@ -24,6 +27,7 @@ type AIInput = {
   moves: string[];
   opp: { id: number; vp: number; res: number }[];
   robber?: RobberPayload;
+  dev?: { kn: number; rb: number; yp: number; mo: number };
 };
 
 function buildRobberMoves(payload: RobberPayload): string[] {
@@ -41,17 +45,27 @@ function buildRobberMoves(payload: RobberPayload): string[] {
   return moves;
 }
 
+function buildKnightMoves(payload: KnightPayload): string[] {
+  const moves: string[] = [];
+  for (const target of payload.targets) {
+    for (const p of target.players) {
+      moves.push(`knight:${target.tile}:${p.id}`);
+    }
+  }
+  if (payload.targets.length === 0) {
+    for (const tile of payload.eligibleTiles.slice(0, 10)) {
+      moves.push(`knight:${tile}:`);
+    }
+  }
+  return moves;
+}
+
 function heuristicDecision(agentName: string, validActions: string[]): AIDecision {
-  if (agentName === 'PortTrader') {
-    const trade = validActions.find(a => a.startsWith('trade_bank:'));
-    if (trade) return { action: trade, commentary: `${agentName} optimizes through bank trading.` };
-  }
-  const prefixes = ['build_city:', 'build_settlement:', 'buy_dev_card', 'build_road:', 'trade_bank:'];
-  for (const prefix of prefixes) {
-    const match = validActions.find(a => a.startsWith(prefix) || a === prefix);
-    if (match) return { action: match, commentary: `${agentName} makes a strategic move.` };
-  }
-  return { action: validActions[0] ?? 'pass', commentary: `${agentName} passes.` };
+  const nonPass = validActions.filter(a => a !== 'pass');
+  const action = nonPass.length > 0
+    ? nonPass[Math.floor(Math.random() * nonPass.length)]
+    : 'pass';
+  return { action, commentary: `${agentName} acts.` };
 }
 
 export async function getAgentDecision(
@@ -62,12 +76,18 @@ export async function getAgentDecision(
   turn: number,
   occupancy: BoardOccupancy,
   robberPayload?: RobberPayload,
+  knightPayload?: KnightPayload,
+  traitsOverride?: Trait[],
 ): Promise<AIDecision> {
   const validActions = getValidActions(player, opponents, occupancy);
   const robberMoves = robberPayload ? buildRobberMoves(robberPayload) : [];
-  const allMoves = [...validActions, ...robberMoves];
+  const knightMoves = knightPayload ? buildKnightMoves(knightPayload) : [];
+  const allMoves = [...validActions, ...robberMoves, ...knightMoves];
 
   if (!hasGeminiKey()) return heuristicDecision(agentName, allMoves);
+
+  const hasDevCards = player.devCards.knight > 0 || player.devCards.road_building > 0
+    || player.devCards.year_of_plenty > 0 || player.devCards.monopoly > 0;
 
   const aiInput: AIInput = {
     turn,
@@ -84,9 +104,10 @@ export async function getAgentDecision(
       res: RESOURCES.reduce((s, r) => s + o[r], 0),
     })),
     ...(robberPayload ? { robber: robberPayload } : {}),
+    ...(hasDevCards ? { dev: { kn: player.devCards.knight, rb: player.devCards.road_building, yp: player.devCards.year_of_plenty, mo: player.devCards.monopoly } } : {}),
   };
 
-  const traits = getAgentTraits(agentName);
+  const traits = traitsOverride ?? getAgentTraits(agentName);
   const systemPrompt = buildSystemPrompt(agentName, traits);
   const userPrompt = `${JSON.stringify(aiInput)}\n\nRespond with JSON: {"a":"<action from moves[]>","c":"<one tactical sentence>"}`;
 

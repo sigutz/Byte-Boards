@@ -8,6 +8,20 @@ import type { HexTile } from './graph';
 export type Resource = 'wood' | 'brick' | 'ore' | 'wheat' | 'sheep';
 export const RESOURCES: Resource[] = ['wood', 'brick', 'ore', 'wheat', 'sheep'];
 
+export type DevCardType = 'knight' | 'vp' | 'road_building' | 'year_of_plenty' | 'monopoly';
+export type DevCardCounts = Record<DevCardType, number>;
+export const EMPTY_DEV_CARDS: DevCardCounts = { knight: 0, vp: 0, road_building: 0, year_of_plenty: 0, monopoly: 0 };
+export const DEV_CARD_DECK: DevCardType[] = [
+  ...Array<DevCardType>(14).fill('knight'),
+  ...Array<DevCardType>(5).fill('vp'),
+  ...Array<DevCardType>(2).fill('road_building'),
+  ...Array<DevCardType>(2).fill('year_of_plenty'),
+  ...Array<DevCardType>(2).fill('monopoly'),
+];
+export function shuffleDeck(): DevCardType[] {
+  return [...DEV_CARD_DECK].sort(() => Math.random() - 0.5);
+}
+
 export type PlayerState = {
   agentId: number;
   name: string;
@@ -19,6 +33,9 @@ export type PlayerState = {
   settlementNodes: number[];
   cityNodes: number[];
   roadEdges: string[];
+  devCards: DevCardCounts;
+  knightsPlayed: number;
+  hasLargestArmy: boolean;
 };
 
 export type BoardOccupancy = {
@@ -54,17 +71,19 @@ export function totalResources(player: PlayerState): number {
 }
 
 export function computeVP(player: PlayerState): number {
-  return player.settlementNodes.length + player.cityNodes.length * 2;
+  return player.settlementNodes.length + player.cityNodes.length * 2 + player.devCards.vp + (player.hasLargestArmy ? 2 : 0);
 }
 
 export function collectResources(
   player: PlayerState,
   diceTotal: number,
   boardTiles: HexTile[],
+  robberTile: number,
 ): Partial<Record<Resource, number>> {
   const gained: Partial<Record<Resource, number>> = {};
   for (const nodeId of player.settlementNodes) {
     for (const tile of boardTiles) {
+      if (tile.index === robberTile) continue;
       if (tile.number === diceTotal && tile.resource !== 'desert' && tile.nodes.includes(nodeId as never)) {
         gained[tile.resource as Resource] = (gained[tile.resource as Resource] ?? 0) + 1;
       }
@@ -72,6 +91,7 @@ export function collectResources(
   }
   for (const nodeId of player.cityNodes) {
     for (const tile of boardTiles) {
+      if (tile.index === robberTile) continue;
       if (tile.number === diceTotal && tile.resource !== 'desert' && tile.nodes.includes(nodeId as never)) {
         gained[tile.resource as Resource] = (gained[tile.resource as Resource] ?? 0) + 2;
       }
@@ -126,8 +146,17 @@ export function getValidActions(
     }
   }
 
-  // Dev card
+  // Buy dev card
   if (canAfford(player, BUILD_COSTS.dev_card)) valid.push('buy_dev_card');
+
+  // Play dev cards (not knight — those are generated from knightPayload in ai.ts)
+  if (player.devCards.road_building > 0) valid.push('play_road_building');
+  if (player.devCards.year_of_plenty > 0) {
+    for (const res of RESOURCES) valid.push(`play_year_of_plenty:${res}`);
+  }
+  if (player.devCards.monopoly > 0) {
+    for (const res of RESOURCES) valid.push(`play_monopoly:${res}`);
+  }
 
   // 4:1 bank trades
   for (const give of RESOURCES) {
@@ -168,6 +197,12 @@ export function applyAction(
   if (action === 'buy_dev_card') {
     player.ore -= 1; player.wheat -= 1; player.sheep -= 1;
     return { text: 'buys a development card', vpDelta: 0 };
+  }
+  if (action.startsWith('play_year_of_plenty:')) {
+    const res = action.slice('play_year_of_plenty:'.length) as Resource;
+    player.devCards.year_of_plenty -= 1;
+    player[res] += 2;
+    return { text: `plays Year of Plenty, gains 2 ${res}`, vpDelta: 0 };
   }
   if (action.startsWith('trade_bank:')) {
     const [, give, receive] = action.split(':') as [string, Resource, Resource];
@@ -229,6 +264,27 @@ export function createInitialPlacement(
   }
 
   return { settlementNodes, cityNodes: [], roadEdges };
+}
+
+export function getValidRoadEdges(player: PlayerState, occupancy: BoardOccupancy): string[] {
+  const playerNodes = new Set([...player.settlementNodes, ...player.cityNodes]);
+  const playerRoadNodes = new Set(
+    player.roadEdges.flatMap(e => [parseInt(e.slice(0, 2), 10), parseInt(e.slice(2, 4), 10)])
+  );
+  const candidateNodes = new Set([...playerNodes, ...playerRoadNodes]);
+  const edges: string[] = [];
+  const checkedEdges = new Set<string>();
+  for (const nodeId of candidateNodes) {
+    for (const adjNode of BOARD_NODES[nodeId].adjacentNodes) {
+      const edge = edgeId(nodeId, adjNode);
+      if (checkedEdges.has(edge)) continue;
+      checkedEdges.add(edge);
+      if (isValidRoadPlacement(edge, occupancy.roads, player.settlementNodes, player.cityNodes)) {
+        edges.push(edge);
+      }
+    }
+  }
+  return edges;
 }
 
 // Re-export graph helpers consumed by index.ts

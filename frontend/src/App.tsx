@@ -307,6 +307,7 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
           linkCopied={linkCopied}
           navigate={navigate}
           error={error}
+          onAgentCreated={() => void loadBase()}
         />
       )}
     </>

@@ -7,15 +7,17 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, MatchStatus, EventType, Role } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import type { PlayerState, BoardOccupancy } from './game/catan';
+import type { PlayerState, BoardOccupancy, DevCardType, DevCardCounts, Resource } from './game/catan';
 import {
   createInitialPlacement, rollDice, collectResources,
   applyAction, computeVP, handleRobber, totalResources,
-  BOARD_TILES, RESOURCES,
+  BOARD_TILES, RESOURCES, EMPTY_DEV_CARDS, shuffleDeck, getValidRoadEdges,
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
-import type { RobberPayload } from './game/ai';
+import type { RobberPayload, KnightPayload } from './game/ai';
 import { BOARD_NODES, getEligibleRobberTiles } from './game/graph';
+import { ALL_TRAITS, TRAIT_DESCRIPTIONS, TRAIT_CONFLICTS, validateTraits } from './game/personality';
+import type { Trait } from './game/personality';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'byte-boards-secret-change-in-production';
 
@@ -172,6 +174,31 @@ function stealRandom(victim: PlayerState, thief: PlayerState): void {
   thief[res] += 1;
 }
 
+function updateLargestArmy(stateMap: Map<number, PlayerState>): void {
+  let currentHolderId: number | null = null;
+  let currentHolderKnights = 0;
+  for (const [id, s] of stateMap) {
+    if (s.hasLargestArmy) { currentHolderId = id; currentHolderKnights = s.knightsPlayed; }
+  }
+  if (currentHolderId === null) {
+    let bestId: number | null = null;
+    let bestKnights = 2;
+    for (const [id, s] of stateMap) {
+      if (s.knightsPlayed > bestKnights) { bestKnights = s.knightsPlayed; bestId = id; }
+    }
+    if (bestId !== null) stateMap.get(bestId)!.hasLargestArmy = true;
+  } else {
+    for (const [id, s] of stateMap) {
+      if (id !== currentHolderId && s.knightsPlayed > currentHolderKnights) {
+        stateMap.get(currentHolderId)!.hasLargestArmy = false;
+        s.hasLargestArmy = true;
+        currentHolderKnights = s.knightsPlayed;
+        currentHolderId = id;
+      }
+    }
+  }
+}
+
 async function persistAgentState(matchId: string, agentId: number, s: PlayerState): Promise<void> {
   await prisma.matchAgent.update({
     where: { matchId_agentId: { matchId, agentId } },
@@ -185,6 +212,8 @@ async function persistAgentState(matchId: string, agentId: number, s: PlayerStat
       settlementNodes: s.settlementNodes as unknown as Prisma.InputJsonValue,
       cityNodes:       s.cityNodes       as unknown as Prisma.InputJsonValue,
       roadEdges:       s.roadEdges       as unknown as Prisma.InputJsonValue,
+      devCards:        s.devCards        as unknown as Prisma.InputJsonValue,
+      knightsPlayed:   s.knightsPlayed,
     },
   });
 }
@@ -199,9 +228,11 @@ async function runMatchSimulation(matchId: string): Promise<void> {
 
     const stateMap = new Map<number, PlayerState>();
     const isResume = match.agents.some(e => (e.settlementNodes as unknown[]).length > 0);
+    const matchRaw = match as unknown as { devDeck?: DevCardType[]; robberTile?: number; largestArmyHolder?: number | null };
 
     if (isResume) {
       for (const entry of match.agents) {
+        const entryRaw = entry as unknown as { knightsPlayed?: number };
         stateMap.set(entry.agentId, {
           agentId: entry.agentId,
           name: entry.agent.name,
@@ -210,7 +241,15 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           settlementNodes: entry.settlementNodes as unknown as number[],
           cityNodes:       entry.cityNodes       as unknown as number[],
           roadEdges:       entry.roadEdges       as unknown as string[],
+          devCards:        { ...EMPTY_DEV_CARDS, ...(entry.devCards as unknown as Partial<DevCardCounts>) },
+          knightsPlayed:   entryRaw.knightsPlayed ?? 0,
+          hasLargestArmy:  false,
         });
+      }
+      // Restore largest army holder
+      const prevLargestArmy = matchRaw.largestArmyHolder;
+      if (prevLargestArmy != null && stateMap.has(prevLargestArmy)) {
+        stateMap.get(prevLargestArmy)!.hasLargestArmy = true;
       }
     } else {
       const takenNodes: number[] = [];
@@ -226,10 +265,22 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           settlementNodes: placement.settlementNodes,
           cityNodes:       placement.cityNodes,
           roadEdges:       placement.roadEdges,
+          devCards:        { ...EMPTY_DEV_CARDS },
+          knightsPlayed:   0,
+          hasLargestArmy:  false,
         };
         stateMap.set(entry.agentId, state);
         await persistAgentState(matchId, entry.agentId, state);
       }
+    }
+
+    // Load or initialise dev deck
+    let devDeck: DevCardType[] = [];
+    if (matchRaw.devDeck && (matchRaw.devDeck as unknown[]).length > 0) {
+      devDeck = matchRaw.devDeck;
+    } else if (!isResume) {
+      devDeck = shuffleDeck();
+      await prisma.match.update({ where: { id: matchId }, data: { devDeck: devDeck as unknown as Prisma.InputJsonValue } });
     }
 
     const lastEvent = await prisma.matchEvent.findFirst({
@@ -237,7 +288,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
       orderBy: { turn: 'desc' },
     });
     let turn = isResume ? (lastEvent?.turn ?? 0) + 1 : 1;
-    let currentRobberTile: number = (match as unknown as { robberTile?: number }).robberTile ?? 9;
+    let currentRobberTile: number = matchRaw.robberTile ?? 9;
 
     while (true) {
       while (pausedMatchJobs.has(matchId)) {
@@ -279,7 +330,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
 
       const gainLog: string[] = [];
       for (const [agentId, s] of stateMap) {
-        const gained = collectResources(s, total, BOARD_TILES);
+        const gained = collectResources(s, total, BOARD_TILES, currentRobberTile);
         const entries = (Object.entries(gained) as [string, number][]).filter(([, v]) => v > 0);
         if (entries.length > 0) {
           for (const [res, amt] of entries) {
@@ -303,14 +354,91 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         const s = stateMap.get(entry.agentId)!;
         const opponents = [...stateMap.values()].filter(p => p.agentId !== entry.agentId);
 
+        // Build knight payload when agent has knight cards (before calling AI)
+        let knightPayload: KnightPayload | undefined;
+        if (s.devCards.knight > 0) {
+          const eligibleForKnight = getEligibleRobberTiles(currentRobberTile);
+          const knightTargets = eligibleForKnight
+            .map(tileIdx => {
+              const tile = BOARD_TILES[tileIdx];
+              const players = [...stateMap.values()]
+                .filter(p =>
+                  p.agentId !== s.agentId && (
+                    p.settlementNodes.some(n => tile.nodes.includes(n as never)) ||
+                    p.cityNodes.some(n => tile.nodes.includes(n as never))
+                  )
+                )
+                .map(p => ({ id: p.agentId, cards: totalResources(p) }));
+              return { tile: tileIdx, players };
+            })
+            .filter(t => t.players.length > 0);
+          knightPayload = { eligibleTiles: eligibleForKnight, targets: knightTargets };
+        }
+
+        const agentTraits = ((entry.agent.traits ?? []) as Trait[]);
         const { action, commentary } = await getAgentDecision(
-          entry.agent.name, s, opponents, total, turn, occupancy, robberPayload,
+          entry.agent.name, s, opponents, total, turn, occupancy,
+          robberPayload, knightPayload,
+          agentTraits.length > 0 ? agentTraits : undefined,
         );
 
+        const oldVP = computeVP(s);
         let actionText: string;
-        let vpDelta: number;
 
-        if (action.startsWith('robber:')) {
+        if (action.startsWith('knight:')) {
+          const parts = action.split(':');
+          const newTile = parseInt(parts[1], 10);
+          const victimId = parts[2] && parts[2].length > 0 ? parseInt(parts[2], 10) : null;
+          s.devCards.knight -= 1;
+          s.knightsPlayed += 1;
+          if (!isNaN(newTile)) {
+            currentRobberTile = newTile;
+            await prisma.match.update({ where: { id: matchId }, data: { robberTile: newTile } });
+          }
+          if (victimId !== null) {
+            const victim = stateMap.get(victimId);
+            if (victim) { stealRandom(victim, s); await persistAgentState(matchId, victimId, victim); }
+          }
+          updateLargestArmy(stateMap);
+          // Persist largest army holder
+          const newHolder = [...stateMap.values()].find(p => p.hasLargestArmy);
+          if (newHolder) {
+            await prisma.match.update({ where: { id: matchId }, data: { largestArmyHolder: newHolder.agentId, robberTile: currentRobberTile } });
+          }
+          actionText = `plays a Knight card, moves robber to tile ${newTile}${victimId !== null ? ` and steals from agent ${victimId}` : ''}`;
+        } else if (action === 'play_road_building') {
+          s.devCards.road_building -= 1;
+          const currentOcc = buildOccupancy(stateMap);
+          const eligibleRoads = getValidRoadEdges(s, currentOcc);
+          let placed = 0;
+          for (const edge of eligibleRoads.slice(0, 2)) {
+            s.roadEdges.push(edge);
+            placed++;
+          }
+          actionText = `plays Road Building, places ${placed} road${placed !== 1 ? 's' : ''}`;
+        } else if (action.startsWith('play_monopoly:')) {
+          const res = action.slice('play_monopoly:'.length) as Resource;
+          s.devCards.monopoly -= 1;
+          let stolen = 0;
+          for (const [oid, opp] of stateMap) {
+            if (oid === s.agentId) continue;
+            stolen += opp[res];
+            s[res] += opp[res];
+            opp[res] = 0;
+            await persistAgentState(matchId, oid, opp);
+          }
+          actionText = `plays Monopoly on ${res}, steals ${stolen} total`;
+        } else if (action === 'buy_dev_card') {
+          applyAction(s, action);
+          if (devDeck.length > 0) {
+            const drawn = devDeck.pop()!;
+            s.devCards[drawn] += 1;
+            await prisma.match.update({ where: { id: matchId }, data: { devDeck: devDeck as unknown as Prisma.InputJsonValue } });
+            actionText = `buys a development card`;
+          } else {
+            actionText = 'tries to buy a dev card but the deck is empty';
+          }
+        } else if (action.startsWith('robber:')) {
           const parts = action.split(':');
           const newTile = parseInt(parts[1], 10);
           const victimId = parts[2] && parts[2].length > 0 ? parseInt(parts[2], 10) : null;
@@ -329,14 +457,13 @@ async function runMatchSimulation(matchId: string): Promise<void> {
             }
           }
           actionText = `moves the robber to tile ${newTile}`;
-          vpDelta = 0;
         } else {
           const result = applyAction(s, action);
           actionText = result.text;
-          vpDelta = result.vpDelta;
         }
 
         const newVP = computeVP(s);
+        const vpDelta = newVP - oldVP;
         await persistAgentState(matchId, entry.agentId, s);
 
         await appendEvent({
@@ -531,6 +658,16 @@ app.get('/api/game-types', (req: Request, res: Response) => {
   res.json(GAME_TYPES);
 });
 
+app.get('/api/traits', (_req: Request, res: Response) => {
+  res.json(
+    ALL_TRAITS.map(t => ({
+      name: t,
+      description: TRAIT_DESCRIPTIONS[t],
+      conflicts: TRAIT_CONFLICTS[t] ?? [],
+    }))
+  );
+});
+
 app.get('/api/agents', async (req: Request, res: Response) => {
   try {
     await seedAgentsIfNeeded();
@@ -539,11 +676,43 @@ app.get('/api/agents', async (req: Request, res: Response) => {
       agents.map((agent) => ({
         id: agent.id,
         name: agent.name,
-        description: agent.description ?? null
+        description: agent.description ?? null,
+        traits: (agent.traits as Trait[]) ?? [],
       }))
     );
   } catch (error) {
     console.error('Error fetching agents:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
+  try {
+    const name = (req.body as { name?: string }).name?.trim();
+    const description = (req.body as { description?: string }).description?.trim() ?? null;
+    const traits = ((req.body as { traits?: unknown }).traits ?? []) as Trait[];
+
+    if (!name || name.length < 2 || name.length > 32) {
+      res.status(400).json({ error: 'Name must be 2–32 characters' }); return;
+    }
+    if (!Array.isArray(traits) || traits.some(t => !ALL_TRAITS.includes(t))) {
+      res.status(400).json({ error: 'Invalid traits' }); return;
+    }
+    if (!validateTraits(traits)) {
+      res.status(400).json({ error: 'Conflicting traits selected' }); return;
+    }
+
+    const agent = await prisma.agent.create({
+      data: { name, description, traits: traits as unknown as Prisma.InputJsonValue },
+    });
+    res.status(201).json({
+      id: agent.id, name: agent.name,
+      description: agent.description ?? null,
+      traits: agent.traits as Trait[],
+    });
+  } catch (err: unknown) {
+    const pg = err as { code?: string };
+    if (pg.code === 'P2002') { res.status(409).json({ error: 'Agent name already taken' }); return; }
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -721,22 +890,36 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       summary: match.summary,
       winner: match.winner?.name ?? null,
       shareToken: match.shareToken,
-      standings: match.agents.map((entry) => ({
-        agentId: String(entry.agentId),
-        name: entry.agent.name,
-        seat: entry.seat,
-        score: entry.score,
-        resources: entry.resources,
-        position: entry.position,
-        wood: entry.wood,
-        brick: entry.brick,
-        ore: entry.ore,
-        wheat: entry.wheat,
-        sheep: entry.sheep,
-        roads: entry.roads,
-        settlements: entry.settlements,
-        cities: entry.cities,
-      })),
+      standings: (() => {
+        const matchRaw2 = match as unknown as { largestArmyHolder?: number | null };
+        const largestArmyHolder = matchRaw2.largestArmyHolder ?? null;
+        return match.agents.map((entry) => {
+          const entryRaw = entry as unknown as { knightsPlayed?: number };
+          const devCards = { ...EMPTY_DEV_CARDS, ...(entry.devCards as unknown as Partial<DevCardCounts>) };
+          return {
+            agentId: String(entry.agentId),
+            name: entry.agent.name,
+            seat: entry.seat,
+            score: entry.score,
+            resources: entry.resources,
+            position: entry.position,
+            wood: entry.wood,
+            brick: entry.brick,
+            ore: entry.ore,
+            wheat: entry.wheat,
+            sheep: entry.sheep,
+            roads: entry.roads,
+            settlements: entry.settlements,
+            cities: entry.cities,
+            settlementNodes: (entry.settlementNodes as unknown as number[]) ?? [],
+            cityNodes:       (entry.cityNodes       as unknown as number[]) ?? [],
+            roadEdges:       (entry.roadEdges       as unknown as string[]) ?? [],
+            devCards,
+            knightsPlayed:   entryRaw.knightsPlayed ?? 0,
+            hasLargestArmy:  entry.agentId === largestArmyHolder,
+          };
+        });
+      })(),
       events: match.events.map((event) => ({
         id: event.id,
         turn: event.turn,
