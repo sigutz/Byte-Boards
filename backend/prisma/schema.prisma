@@ -25,12 +25,13 @@ model Agent {
   id          Int          @id @default(autoincrement())
   name        String       @unique
   description String?
-  traits      Json         @default("[]")
+  traits      Json         @default("[]")  // deprecated — use AgentTrait relation
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   wonMatches  Match[]      @relation("MatchWinner")
   matches     MatchAgent[]
   events      MatchEvent[] @relation("EventActor")
+  agentTraits AgentTrait[]
 }
 
 model Match {
@@ -100,6 +101,7 @@ model Trait {
   name        String          @unique
   description String
   conflictsAs TraitConflict[] @relation("ConflictSource")
+  agentTraits AgentTrait[]
 }
 
 model TraitConflict {
@@ -108,6 +110,15 @@ model TraitConflict {
   source   Trait @relation("ConflictSource", fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@id([sourceId, targetId])
+}
+
+model AgentTrait {
+  agentId Int
+  traitId Int
+  agent   Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  trait   Trait @relation(fields: [traitId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, traitId])
 }
 
 enum MatchStatus {

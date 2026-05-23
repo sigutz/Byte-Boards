@@ -3,6 +3,8 @@ services:
     image: postgres:15
     container_name: postgres-db
     restart: unless-stopped
+    ports:                  # <--- ADD THIS LINE
+      - "5432:5432"
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin

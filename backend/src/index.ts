@@ -72,11 +72,11 @@ app.use(express.json());
 const TARGET_SCORE = 8;
 const MAX_TURNS = 500;
 const GAME_TYPES = ['catan-classic', 'catan-seafarers'];
-const DEFAULT_AGENTS = [
-  { name: 'HexaMind', description: 'Expansion-focused strategic planner' },
-  { name: 'RoadRunner', description: 'Fast settlement and road builder' },
-  { name: 'PortTrader', description: 'Resource conversion and trade optimizer' },
-  { name: 'SheepBaron', description: 'Development card and resource hoarder' }
+const DEFAULT_AGENTS: { name: string; description: string; traits: string[] }[] = [
+  { name: 'HexaMind',   description: 'Expansion-focused strategic planner',      traits: ['Expansionist', 'Aggressive'] },
+  { name: 'RoadRunner', description: 'Fast settlement and road builder',          traits: ['Aggressive', 'HardTrader'] },
+  { name: 'PortTrader', description: 'Resource conversion and trade optimizer',   traits: ['Greedy', 'HardTrader'] },
+  { name: 'SheepBaron', description: 'Development card and resource hoarder',     traits: ['Greedy', 'Defensive'] },
 ];
 const liveMatchJobs = new Set<string>();
 const pausedMatchJobs = new Set<string>();
@@ -89,13 +89,43 @@ function randomInt(min: number, max: number): number {
 }
 
 
+async function migrateAgentTraitsIfNeeded(): Promise<void> {
+  const agentTraitCount = await prisma.agentTrait.count();
+  if (agentTraitCount > 0) return;
+
+  const agents = await prisma.agent.findMany();
+  const traitRows = await prisma.trait.findMany({ select: { id: true, name: true } });
+  if (traitRows.length === 0) return;
+  const idOf = Object.fromEntries(traitRows.map(r => [r.name, r.id]));
+
+  for (const agent of agents) {
+    const traitsJson = (agent.traits as string[]) ?? [];
+    const records = traitsJson.map(t => idOf[t]).filter(Boolean).map(traitId => ({ agentId: agent.id, traitId }));
+    if (records.length > 0) {
+      await prisma.agentTrait.createMany({ data: records, skipDuplicates: true });
+    }
+  }
+}
+
 async function seedAgentsIfNeeded(): Promise<void> {
   const existing = await prisma.agent.count();
   if (existing > 0) {
+    await migrateAgentTraitsIfNeeded();
     return;
   }
 
-  await prisma.agent.createMany({ data: DEFAULT_AGENTS });
+  const traitRows = await prisma.trait.findMany({ select: { id: true, name: true } });
+  const idOf = Object.fromEntries(traitRows.map(r => [r.name, r.id]));
+
+  for (const agentDef of DEFAULT_AGENTS) {
+    const agent = await prisma.agent.create({
+      data: { name: agentDef.name, description: agentDef.description, traits: agentDef.traits as unknown as Prisma.InputJsonValue },
+    });
+    const records = agentDef.traits.map(t => idOf[t]).filter(Boolean).map(traitId => ({ agentId: agent.id, traitId }));
+    if (records.length > 0) {
+      await prisma.agentTrait.createMany({ data: records, skipDuplicates: true });
+    }
+  }
 }
 
 async function seedTraitsIfNeeded(): Promise<void> {
@@ -132,7 +162,10 @@ async function getMatchWithDetails(matchId: string) {
     where: { id: matchId },
     include: {
       winner: true,
-      agents: { include: { agent: true }, orderBy: { seat: 'asc' } },
+      agents: {
+        include: { agent: { include: { agentTraits: { include: { trait: true } } } } },
+        orderBy: { seat: 'asc' },
+      },
       events: {
         include: { actor: true },
         orderBy: [{ turn: 'asc' }, { createdAt: 'asc' }]
@@ -452,7 +485,9 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           knightPayload = { eligibleTiles: eligibleForKnight, targets: knightTargets };
         }
 
-        const agentTraits = ((entry.agent.traits ?? []) as Trait[]);
+        const agentTraits: Trait[] = entry.agent.agentTraits.length > 0
+          ? entry.agent.agentTraits.map(at => at.trait.name as Trait)
+          : ((entry.agent.traits ?? []) as Trait[]);
         const { action, commentary } = await getAgentDecision(
           entry.agent.name, s, opponents, total, turn, occupancy,
           robberPayload, knightPayload,
@@ -805,13 +840,18 @@ app.get('/api/traits', async (_req: Request, res: Response) => {
 app.get('/api/agents', async (req: Request, res: Response) => {
   try {
     await seedAgentsIfNeeded();
-    const agents = await prisma.agent.findMany({ orderBy: { id: 'asc' } });
+    const agents = await prisma.agent.findMany({
+      orderBy: { id: 'asc' },
+      include: { agentTraits: { include: { trait: true } } },
+    });
     res.json(
       agents.map((agent) => ({
         id: agent.id,
         name: agent.name,
         description: agent.description ?? null,
-        traits: (agent.traits as Trait[]) ?? [],
+        traits: agent.agentTraits.length > 0
+          ? agent.agentTraits.map(at => at.trait.name as Trait)
+          : (agent.traits as Trait[]) ?? [],
       }))
     );
   } catch (error) {
@@ -857,10 +897,20 @@ app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
     const agent = await prisma.agent.create({
       data: { name, description, traits: traits as unknown as Prisma.InputJsonValue },
     });
+    if (traits.length > 0) {
+      const selectedTraitRows = await prisma.trait.findMany({
+        where: { name: { in: traits } },
+        select: { id: true },
+      });
+      await prisma.agentTrait.createMany({
+        data: selectedTraitRows.map(t => ({ agentId: agent.id, traitId: t.id })),
+        skipDuplicates: true,
+      });
+    }
     res.status(201).json({
       id: agent.id, name: agent.name,
       description: agent.description ?? null,
-      traits: agent.traits as Trait[],
+      traits,
     });
   } catch (err: unknown) {
     const pg = err as { code?: string };
@@ -1211,12 +1261,14 @@ app.get('/api/health', async (_req: Request, res: Response) => {
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  seedAgentsIfNeeded().catch((error) => {
-    console.error('Failed to seed agents:', error);
-  });
-  seedTraitsIfNeeded().catch((error) => {
-    console.error('Failed to seed traits:', error);
-  });
+  (async () => {
+    try {
+      await seedTraitsIfNeeded();
+      await seedAgentsIfNeeded();
+    } catch (error) {
+      console.error('Failed to seed data:', error);
+    }
+  })();
   prisma.match.findMany({ where: { status: MatchStatus.LIVE } }).then((liveMatches) => {
     for (const match of liveMatches) {
       void runMatchSimulation(match.id);
