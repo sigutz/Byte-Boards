@@ -1,32 +1,57 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { PlayerState, RESOURCES, getValidActions } from './catan';
-
-const geminiApiKey = process.env.GEMINI_API_KEY;
-const client = geminiApiKey ? new GoogleGenerativeAI(geminiApiKey) : null;
-
-// Personality prompt per agent name — maps to the agent descriptions in the DB
-const PERSONALITIES: Record<string, string> = {
-  HexaMind:    'You prioritize territorial expansion. Build settlements and roads aggressively to claim high-value spots before opponents.',
-  RoadRunner:  'You race to place roads and cut off expansion routes. Build roads first, then settle the spots you have blocked off.',
-  PortTrader:  'You optimize resource efficiency. Trade at the bank when you have surplus, and rush city upgrades for double production.',
-  SheepBaron:  'You hoard ore, wheat, and sheep to spam cities and development cards. Avoid roads unless absolutely necessary.',
-};
+import { RESOURCES, computeVP, getValidActions } from './catan';
+import type { PlayerState, BoardOccupancy } from './catan';
+import { callGemini, hasGeminiKey } from './gemini-client';
+import { getAgentTraits, buildSystemPrompt } from './personality';
 
 export type AIDecision = {
   action: string;
   commentary: string;
 };
 
-// Heuristic fallback when no API key or the API call fails
+export type RobberPayload = {
+  eligibleTiles: number[];
+  targets: { tile: number; players: { id: number; cards: number }[] }[];
+};
+
+type AIInput = {
+  turn: number;
+  dice: number;
+  inv: { w: number; b: number; o: number; wh: number; sh: number };
+  vp: number;
+  settlements: number[];
+  cities: number[];
+  roads: string[];
+  moves: string[];
+  opp: { id: number; vp: number; res: number }[];
+  robber?: RobberPayload;
+};
+
+function buildRobberMoves(payload: RobberPayload): string[] {
+  const moves: string[] = [];
+  for (const target of payload.targets) {
+    for (const p of target.players) {
+      moves.push(`robber:${target.tile}:${p.id}`);
+    }
+  }
+  if (payload.targets.length === 0) {
+    for (const tile of payload.eligibleTiles.slice(0, 10)) {
+      moves.push(`robber:${tile}:`);
+    }
+  }
+  return moves;
+}
+
 function heuristicDecision(agentName: string, validActions: string[]): AIDecision {
-  const priority = ['build_city', 'build_settlement', 'buy_dev_card', 'build_road'];
-  // PortTrader prefers trading first
   if (agentName === 'PortTrader') {
     const trade = validActions.find(a => a.startsWith('trade_bank:'));
     if (trade) return { action: trade, commentary: `${agentName} optimizes through bank trading.` };
   }
-  const best = priority.find(a => validActions.includes(a)) ?? validActions[0] ?? 'pass';
-  return { action: best, commentary: `${agentName} makes a strategic move.` };
+  const prefixes = ['build_city:', 'build_settlement:', 'buy_dev_card', 'build_road:', 'trade_bank:'];
+  for (const prefix of prefixes) {
+    const match = validActions.find(a => a.startsWith(prefix) || a === prefix);
+    if (match) return { action: match, commentary: `${agentName} makes a strategic move.` };
+  }
+  return { action: validActions[0] ?? 'pass', commentary: `${agentName} passes.` };
 }
 
 export async function getAgentDecision(
@@ -35,61 +60,43 @@ export async function getAgentDecision(
   opponents: PlayerState[],
   diceTotal: number,
   turn: number,
+  occupancy: BoardOccupancy,
+  robberPayload?: RobberPayload,
 ): Promise<AIDecision> {
-  const validActions = getValidActions(player);
-  const personality = PERSONALITIES[agentName] ?? 'You are a balanced Catan player.';
+  const validActions = getValidActions(player, opponents, occupancy);
+  const robberMoves = robberPayload ? buildRobberMoves(robberPayload) : [];
+  const allMoves = [...validActions, ...robberMoves];
 
-  if (!client) return heuristicDecision(agentName, validActions);
+  if (!hasGeminiKey()) return heuristicDecision(agentName, allMoves);
 
-  const resources = RESOURCES.map(r => `${r[0].toUpperCase()}${r.slice(1)}: ${player[r]}`).join(' | ');
-  const buildings = `${player.settlements} settlements, ${player.cities} cities, ${player.roads} roads`;
-  const vp = computeVPText(player);
-  const oppText = opponents
-    .map(o => `${o.name}: ${o.settlements + o.cities * 2}VP, ${RESOURCES.reduce((s, r) => s + o[r], 0)} res`)
-    .join('; ');
+  const aiInput: AIInput = {
+    turn,
+    dice: diceTotal,
+    inv: { w: player.wood, b: player.brick, o: player.ore, wh: player.wheat, sh: player.sheep },
+    vp: computeVP(player),
+    settlements: player.settlementNodes,
+    cities: player.cityNodes,
+    roads: player.roadEdges,
+    moves: allMoves,
+    opp: opponents.map(o => ({
+      id: o.agentId,
+      vp: computeVP(o),
+      res: RESOURCES.reduce((s, r) => s + o[r], 0),
+    })),
+    ...(robberPayload ? { robber: robberPayload } : {}),
+  };
 
-  const prompt = `You are ${agentName} playing Settlers of Catan. ${personality}
-
-TURN ${turn} | Dice: ${diceTotal}
-Your VP: ${vp} (first to 10 wins)
-Your resources: ${resources}
-Your buildings: ${buildings}
-Opponents: ${oppText}
-
-Valid actions: ${validActions.join(', ')}
-
-Pick the single best action from the valid list. Return JSON only: {"action": "<exact action from list>", "commentary": "<one tactical sentence>"}`;
+  const traits = getAgentTraits(agentName);
+  const systemPrompt = buildSystemPrompt(agentName, traits);
+  const userPrompt = `${JSON.stringify(aiInput)}\n\nRespond with JSON: {"a":"<action from moves[]>","c":"<one tactical sentence>"}`;
 
   try {
-    const model = client.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 180,
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const result = await Promise.race([
-      model.generateContent(prompt),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
-    ]);
-
-    const text = result.response.text();
-    const match = text.match(/\{[\s\S]*?\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]) as { action?: string; commentary?: string };
-      const action = validActions.includes(parsed.action ?? '') ? (parsed.action ?? 'pass') : 'pass';
-      return { action, commentary: parsed.commentary ?? `${agentName} acts decisively.` };
-    }
+    const text = await callGemini(userPrompt, systemPrompt);
+    const parsed = JSON.parse(text) as { a?: string; c?: string };
+    const action = allMoves.includes(parsed.a ?? '') ? parsed.a! : heuristicDecision(agentName, allMoves).action;
+    return { action, commentary: parsed.c ?? `${agentName} acts decisively.` };
   } catch (err) {
     console.error(`[AI] ${agentName} call failed:`, (err as Error).message);
+    return heuristicDecision(agentName, allMoves);
   }
-
-  return heuristicDecision(agentName, validActions);
-}
-
-function computeVPText(player: PlayerState): string {
-  const vp = player.settlements + player.cities * 2;
-  return `${vp}/10`;
 }

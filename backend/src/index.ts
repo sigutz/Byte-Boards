@@ -7,12 +7,15 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, MatchStatus, EventType, Role } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import type { PlayerState } from './game/catan';
+import type { PlayerState, BoardOccupancy } from './game/catan';
 import {
-  createStartingTiles, rollDice, collectResources,
+  createInitialPlacement, rollDice, collectResources,
   applyAction, computeVP, handleRobber, totalResources,
+  BOARD_TILES, RESOURCES,
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
+import type { RobberPayload } from './game/ai';
+import { BOARD_NODES, getEligibleRobberTiles } from './game/graph';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'byte-boards-secret-change-in-production';
 
@@ -153,6 +156,39 @@ function readParam(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
+function buildOccupancy(stateMap: Map<number, PlayerState>): BoardOccupancy {
+  return {
+    settlements: [...stateMap.values()].flatMap(p => p.settlementNodes),
+    cities:      [...stateMap.values()].flatMap(p => p.cityNodes),
+    roads:       [...stateMap.values()].flatMap(p => p.roadEdges),
+  };
+}
+
+function stealRandom(victim: PlayerState, thief: PlayerState): void {
+  const available = RESOURCES.filter(r => victim[r] > 0);
+  if (available.length === 0) return;
+  const res = available[Math.floor(Math.random() * available.length)];
+  victim[res] -= 1;
+  thief[res] += 1;
+}
+
+async function persistAgentState(matchId: string, agentId: number, s: PlayerState): Promise<void> {
+  await prisma.matchAgent.update({
+    where: { matchId_agentId: { matchId, agentId } },
+    data: {
+      score:           computeVP(s),
+      resources:       totalResources(s),
+      wood: s.wood, brick: s.brick, ore: s.ore, wheat: s.wheat, sheep: s.sheep,
+      roads:           s.roadEdges.length,
+      settlements:     s.settlementNodes.length,
+      cities:          s.cityNodes.length,
+      settlementNodes: s.settlementNodes as unknown as Prisma.InputJsonValue,
+      cityNodes:       s.cityNodes       as unknown as Prisma.InputJsonValue,
+      roadEdges:       s.roadEdges       as unknown as Prisma.InputJsonValue,
+    },
+  });
+}
+
 async function runMatchSimulation(matchId: string): Promise<void> {
   if (liveMatchJobs.has(matchId)) return;
   liveMatchJobs.add(matchId);
@@ -161,33 +197,38 @@ async function runMatchSimulation(matchId: string): Promise<void> {
     const match = await getMatchWithDetails(matchId);
     if (!match || match.status !== MatchStatus.LIVE) return;
 
-    // Build in-memory player states — restore from DB if game already started
     const stateMap = new Map<number, PlayerState>();
-    const isResume = match.agents.some(e => (e.tiles as unknown[]).length > 0);
+    const isResume = match.agents.some(e => (e.settlementNodes as unknown[]).length > 0);
 
-    for (const entry of match.agents) {
-      if (isResume) {
+    if (isResume) {
+      for (const entry of match.agents) {
         stateMap.set(entry.agentId, {
           agentId: entry.agentId,
           name: entry.agent.name,
           wood: entry.wood, brick: entry.brick, ore: entry.ore,
           wheat: entry.wheat, sheep: entry.sheep,
-          roads: entry.roads, settlements: entry.settlements, cities: entry.cities,
-          tiles: entry.tiles as unknown as import('./game/catan').Tile[],
+          settlementNodes: entry.settlementNodes as unknown as number[],
+          cityNodes:       entry.cityNodes       as unknown as number[],
+          roadEdges:       entry.roadEdges       as unknown as string[],
         });
-      } else {
-        const tiles = createStartingTiles();
-        stateMap.set(entry.agentId, {
+      }
+    } else {
+      const takenNodes: number[] = [];
+      const takenEdges: string[] = [];
+      for (const entry of match.agents) {
+        const placement = createInitialPlacement(takenNodes, takenEdges);
+        takenNodes.push(...placement.settlementNodes);
+        takenEdges.push(...placement.roadEdges);
+        const state: PlayerState = {
           agentId: entry.agentId,
           name: entry.agent.name,
           wood: 0, brick: 0, ore: 0, wheat: 0, sheep: 0,
-          roads: 0, settlements: 2, cities: 0,
-          tiles,
-        });
-        await prisma.matchAgent.update({
-          where: { matchId_agentId: { matchId, agentId: entry.agentId } },
-          data: { settlements: 2, score: 2, tiles: tiles as unknown as Prisma.InputJsonValue },
-        });
+          settlementNodes: placement.settlementNodes,
+          cityNodes:       placement.cityNodes,
+          roadEdges:       placement.roadEdges,
+        };
+        stateMap.set(entry.agentId, state);
+        await persistAgentState(matchId, entry.agentId, state);
       }
     }
 
@@ -196,6 +237,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
       orderBy: { turn: 'desc' },
     });
     let turn = isResume ? (lastEvent?.turn ?? 0) + 1 : 1;
+    let currentRobberTile: number = (match as unknown as { robberTile?: number }).robberTile ?? 9;
 
     while (true) {
       while (pausedMatchJobs.has(matchId)) {
@@ -204,26 +246,40 @@ async function runMatchSimulation(matchId: string): Promise<void> {
       const current = await prisma.match.findUnique({ where: { id: matchId }, select: { status: true } });
       if (!current || current.status === MatchStatus.COMPLETED) return;
 
+      const occupancy = buildOccupancy(stateMap);
       const [d1, d2] = rollDice();
       const total = d1 + d2;
 
-      // Roll of 7 → robber
+      let robberPayload: RobberPayload | undefined;
+
       if (total === 7) {
         const msg = handleRobber([...stateMap.values()]);
         await appendEvent({ matchId, turn, type: EventType.COMMENTARY, text: `Robber! Dice: 7. ${msg}.` });
-        // Persist updated resources after discard
         for (const [agentId, s] of stateMap) {
           await prisma.matchAgent.update({
             where: { matchId_agentId: { matchId, agentId } },
             data: { wood: s.wood, brick: s.brick, ore: s.ore, wheat: s.wheat, sheep: s.sheep, resources: totalResources(s) },
           });
         }
+        const eligible = getEligibleRobberTiles(currentRobberTile);
+        const targets = eligible
+          .map(tileIdx => {
+            const tile = BOARD_TILES[tileIdx];
+            const players = [...stateMap.values()]
+              .filter(p =>
+                p.settlementNodes.some(n => tile.nodes.includes(n as never)) ||
+                p.cityNodes.some(n => tile.nodes.includes(n as never))
+              )
+              .map(p => ({ id: p.agentId, cards: totalResources(p) }));
+            return { tile: tileIdx, players };
+          })
+          .filter(t => t.players.length > 0);
+        robberPayload = { eligibleTiles: eligible, targets };
       }
 
-      // Distribute resources to all players whose tiles match the roll
       const gainLog: string[] = [];
       for (const [agentId, s] of stateMap) {
-        const gained = collectResources(s, total);
+        const gained = collectResources(s, total, BOARD_TILES);
         const entries = (Object.entries(gained) as [string, number][]).filter(([, v]) => v > 0);
         if (entries.length > 0) {
           for (const [res, amt] of entries) {
@@ -243,27 +299,45 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         payload: { dice: [d1, d2] },
       });
 
-      // Each player acts in seat order
       for (const entry of match.agents) {
         const s = stateMap.get(entry.agentId)!;
         const opponents = [...stateMap.values()].filter(p => p.agentId !== entry.agentId);
 
         const { action, commentary } = await getAgentDecision(
-          entry.agent.name, s, opponents, total, turn,
+          entry.agent.name, s, opponents, total, turn, occupancy, robberPayload,
         );
 
-        const { text: actionText, vpDelta } = applyAction(s, action);
-        const newVP = computeVP(s);
+        let actionText: string;
+        let vpDelta: number;
 
-        await prisma.matchAgent.update({
-          where: { matchId_agentId: { matchId, agentId: entry.agentId } },
-          data: {
-            score: newVP,
-            resources: totalResources(s),
-            wood: s.wood, brick: s.brick, ore: s.ore, wheat: s.wheat, sheep: s.sheep,
-            roads: s.roads, settlements: s.settlements, cities: s.cities,
-          },
-        });
+        if (action.startsWith('robber:')) {
+          const parts = action.split(':');
+          const newTile = parseInt(parts[1], 10);
+          const victimId = parts[2] && parts[2].length > 0 ? parseInt(parts[2], 10) : null;
+          if (!isNaN(newTile)) {
+            currentRobberTile = newTile;
+            await prisma.match.update({ where: { id: matchId }, data: { robberTile: newTile } });
+          }
+          if (victimId !== null) {
+            const victim = stateMap.get(victimId);
+            if (victim) {
+              stealRandom(victim, s);
+              await prisma.matchAgent.update({
+                where: { matchId_agentId: { matchId, agentId: victimId } },
+                data: { wood: victim.wood, brick: victim.brick, ore: victim.ore, wheat: victim.wheat, sheep: victim.sheep, resources: totalResources(victim) },
+              });
+            }
+          }
+          actionText = `moves the robber to tile ${newTile}`;
+          vpDelta = 0;
+        } else {
+          const result = applyAction(s, action);
+          actionText = result.text;
+          vpDelta = result.vpDelta;
+        }
+
+        const newVP = computeVP(s);
+        await persistAgentState(matchId, entry.agentId, s);
 
         await appendEvent({
           matchId, turn, type: EventType.MOVE, actorId: entry.agentId,
@@ -278,7 +352,6 @@ async function runMatchSimulation(matchId: string): Promise<void> {
 
         publishSse(matchId, { kind: 'tick', turn, actor: entry.agent.name });
 
-        // Win check
         if (newVP >= TARGET_SCORE) {
           const allAgents = await prisma.matchAgent.findMany({
             where: { matchId }, include: { agent: true },
@@ -290,25 +363,18 @@ async function runMatchSimulation(matchId: string): Promise<void> {
               data: { position: i + 1 },
             });
           }
-
           await appendEvent({
             matchId, turn: turn + 1, type: EventType.RESULT, actorId: entry.agentId,
             text: `${entry.agent.name} reaches ${newVP} VP — wins the game!`,
           });
-
           await prisma.match.update({
             where: { id: matchId },
             data: { status: MatchStatus.COMPLETED, endedAt: new Date(), winnerId: entry.agentId },
           });
-
           const completed = await getMatchWithDetails(matchId);
           if (completed) {
-            await prisma.match.update({
-              where: { id: matchId },
-              data: { summary: buildAutoSummary(completed) },
-            });
+            await prisma.match.update({ where: { id: matchId }, data: { summary: buildAutoSummary(completed) } });
           }
-
           publishSse(matchId, { kind: 'completed', matchId });
           return;
         }
@@ -338,10 +404,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         });
         const completed = await getMatchWithDetails(matchId);
         if (completed) {
-          await prisma.match.update({
-            where: { id: matchId },
-            data: { summary: buildAutoSummary(completed) },
-          });
+          await prisma.match.update({ where: { id: matchId }, data: { summary: buildAutoSummary(completed) } });
         }
         publishSse(matchId, { kind: 'completed', matchId });
         return;
