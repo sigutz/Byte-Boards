@@ -9,12 +9,15 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
-    host: true, // Permite accesul din exteriorul containerului
-    allowedHosts: ['cine406.go.ro'], // Autorizează domeniul tău Digi
+    host: true,
+    allowedHosts: ['cine406.go.ro'],
     port: 5173,
-    strictPort: false, // Dacă e ocupat, încearcă automat un port liber
+    strictPort: false,
     watch: {
-      usePolling: true, // Necesar în Docker pe Windows/macOS, dar bun de siguranță și pe Linux
+      usePolling: true,
+    },
+    proxy: {
+      '/api': 'http://localhost:5000',
     },
   },
 })

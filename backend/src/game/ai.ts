@@ -60,12 +60,58 @@ function buildKnightMoves(payload: KnightPayload): string[] {
   return moves;
 }
 
+function describeAction(agentName: string, action: string): string {
+  if (action === 'pass') return `${agentName} has nothing useful to do and passes.`;
+  if (action.startsWith('build_road:')) {
+    const edge = action.slice('build_road:'.length);
+    return `${agentName} builds a road on edge ${edge} to expand their network.`;
+  }
+  if (action.startsWith('build_settlement:')) {
+    const node = parseInt(action.slice('build_settlement:'.length), 10);
+    return `${agentName} places a settlement at node ${node} to secure a new resource spot.`;
+  }
+  if (action.startsWith('build_city:')) {
+    const node = parseInt(action.slice('build_city:'.length), 10);
+    return `${agentName} upgrades node ${node} to a city for double production.`;
+  }
+  if (action === 'buy_dev_card') return `${agentName} buys a development card, hoping for a Knight or VP.`;
+  if (action.startsWith('trade_bank:')) {
+    const parts = action.split(':');
+    return `${agentName} trades 4 ${parts[1]} for 1 ${parts[2]} at the bank.`;
+  }
+  if (action.startsWith('play_knight:')) {
+    const parts = action.split(':');
+    const victim = parts[2] ? ` and steals from agent ${parts[2]}` : '';
+    return `${agentName} plays a Knight card, moving the robber to tile ${parts[1]}${victim}.`;
+  }
+  if (action.startsWith('play_monopoly:')) {
+    const res = action.slice('play_monopoly:'.length);
+    return `${agentName} plays Monopoly on ${res}, draining all opponents.`;
+  }
+  if (action === 'play_road_building') return `${agentName} plays Road Building to extend their reach with two free roads.`;
+  if (action.startsWith('play_year_of_plenty:')) {
+    const res = action.slice('play_year_of_plenty:'.length);
+    return `${agentName} plays Year of Plenty, taking 2 free ${res}.`;
+  }
+  if (action.startsWith('robber:')) {
+    const parts = action.split(':');
+    const victim = parts[2] ? ` and steals from agent ${parts[2]}` : '';
+    return `${agentName} moves the robber to tile ${parts[1]}${victim}.`;
+  }
+  if (action.startsWith('knight:')) {
+    const parts = action.split(':');
+    const victim = parts[2] ? ` and steals from agent ${parts[2]}` : '';
+    return `${agentName} plays a Knight, placing the robber on tile ${parts[1]}${victim}.`;
+  }
+  return `${agentName} makes a move.`;
+}
+
 function heuristicDecision(agentName: string, validActions: string[]): AIDecision {
   const nonPass = validActions.filter(a => a !== 'pass');
   const action = nonPass.length > 0
     ? nonPass[Math.floor(Math.random() * nonPass.length)]
     : 'pass';
-  return { action, commentary: `${agentName} acts.` };
+  return { action, commentary: describeAction(agentName, action) };
 }
 
 export async function getAgentDecision(
@@ -109,7 +155,7 @@ export async function getAgentDecision(
 
   const traits = traitsOverride ?? getAgentTraits(agentName);
   const systemPrompt = buildSystemPrompt(agentName, traits);
-  const userPrompt = `${JSON.stringify(aiInput)}\n\nRespond with JSON: {"a":"<action from moves[]>","c":"<one tactical sentence>"}`;
+  const userPrompt = `${JSON.stringify(aiInput)}\n\nRespond with JSON: {"a":"<action from moves[]>","c":"<one sentence describing exactly what you are doing and why, naming the specific action — e.g. 'I build a settlement at node 7 to lock in wheat production before the others do.'>"}`;
 
   try {
     const text = await callGemini(userPrompt, systemPrompt);
