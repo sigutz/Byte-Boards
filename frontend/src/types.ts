@@ -35,6 +35,7 @@ export type Standing = {
   devCards?: DevCardCounts;
   knightsPlayed?: number;
   hasLargestArmy?: boolean;
+  hasLongestRoad?: boolean;
 };
 
 export type MatchEvent = {

@@ -145,8 +145,8 @@ function HexTile({ tile, isRobber }: { tile: TileData; isRobber: boolean }) {
       <polygon
         points={hexPoints(cx, cy, R - 1)}
         fill={color}
-        stroke={isRobber ? '#dc2626' : '#0a1218'}
-        strokeWidth={isRobber ? 3 : 2}
+        stroke={isRobber ? '#6d28d9' : '#0a1218'}
+        strokeWidth={2}
       />
       {imgExists && (
         <clipPath id={`hex-clip-${tile.index}`}>
@@ -160,18 +160,18 @@ function HexTile({ tile, isRobber }: { tile: TileData; isRobber: boolean }) {
           width={(R - 1) * 2} height={(R - 1) * 2}
           preserveAspectRatio="xMidYMid slice"
           clipPath={`url(#hex-clip-${tile.index})`}
-          opacity={isRobber ? 0.45 : 0.85}
+          opacity={0.85}
         />
       )}
       {!imgExists && tile.resource !== 'desert' && (
         <text x={cx} y={cy - 10} textAnchor="middle" fontSize={16}
-          style={{ userSelect: 'none' }} opacity={isRobber ? 0.4 : 1}>
+          style={{ userSelect: 'none' }}>
           {RESOURCE_ICON[tile.resource]}
         </text>
       )}
       {!imgExists && tile.resource === 'desert' && (
         <text x={cx} y={cy + 5} textAnchor="middle" fontSize={18}
-          style={{ userSelect: 'none' }} opacity={isRobber ? 0.4 : 1}>
+          style={{ userSelect: 'none' }}>
           🏜️
         </text>
       )}

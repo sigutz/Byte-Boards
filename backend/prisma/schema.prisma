@@ -46,6 +46,7 @@ model Match {
   robberTile        Int          @default(9)
   devDeck           Json         @default("[]")
   largestArmyHolder Int?
+  longestRoadHolder Int?
   createdById       Int?
   winner      Agent?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
   createdBy   User?        @relation("MatchCreator", fields: [createdById], references: [id], onDelete: SetNull)

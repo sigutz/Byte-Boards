@@ -11,7 +11,7 @@ import type { PlayerState, BoardOccupancy, DevCardType, DevCardCounts, Resource 
 import {
   createInitialPlacement, rollDice, collectResources,
   applyAction, computeVP, handleRobber, totalResources,
-  BOARD_TILES, RESOURCES, EMPTY_DEV_CARDS, shuffleDeck, getValidRoadEdges,
+  BOARD_TILES, RESOURCES, EMPTY_DEV_CARDS, shuffleDeck, getValidRoadEdges, computeLongestRoad,
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
 import type { RobberPayload, KnightPayload } from './game/ai';
@@ -199,6 +199,47 @@ function updateLargestArmy(stateMap: Map<number, PlayerState>): void {
   }
 }
 
+function updateLongestRoad(stateMap: Map<number, PlayerState>): void {
+  function roadLen(id: number, s: PlayerState): number {
+    const myOcc = new Set([...s.settlementNodes, ...s.cityNodes]);
+    const oppOcc = new Set<number>();
+    for (const [oid, os] of stateMap) {
+      if (oid !== id) {
+        for (const n of os.settlementNodes) oppOcc.add(n);
+        for (const n of os.cityNodes) oppOcc.add(n);
+      }
+    }
+    return computeLongestRoad(s.roadEdges, myOcc, oppOcc);
+  }
+
+  let currentHolderId: number | null = null;
+  let currentHolderLen = 0;
+  for (const [id, s] of stateMap) {
+    if (s.hasLongestRoad) { currentHolderId = id; currentHolderLen = roadLen(id, s); break; }
+  }
+
+  if (currentHolderId === null) {
+    let bestId: number | null = null;
+    let bestLen = 4;
+    for (const [id, s] of stateMap) {
+      const len = roadLen(id, s);
+      if (len > bestLen) { bestLen = len; bestId = id; }
+    }
+    if (bestId !== null) stateMap.get(bestId)!.hasLongestRoad = true;
+  } else {
+    for (const [id, s] of stateMap) {
+      if (id === currentHolderId) continue;
+      const len = roadLen(id, s);
+      if (len > currentHolderLen) {
+        stateMap.get(currentHolderId)!.hasLongestRoad = false;
+        s.hasLongestRoad = true;
+        currentHolderLen = len;
+        currentHolderId = id;
+      }
+    }
+  }
+}
+
 async function persistAgentState(matchId: string, agentId: number, s: PlayerState): Promise<void> {
   await prisma.matchAgent.update({
     where: { matchId_agentId: { matchId, agentId } },
@@ -228,7 +269,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
 
     const stateMap = new Map<number, PlayerState>();
     const isResume = match.agents.some(e => (e.settlementNodes as unknown[]).length > 0);
-    const matchRaw = match as unknown as { devDeck?: DevCardType[]; robberTile?: number; largestArmyHolder?: number | null };
+    const matchRaw = match as unknown as { devDeck?: DevCardType[]; robberTile?: number; largestArmyHolder?: number | null; longestRoadHolder?: number | null };
 
     if (isResume) {
       for (const entry of match.agents) {
@@ -244,12 +285,18 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           devCards:        { ...EMPTY_DEV_CARDS, ...(entry.devCards as unknown as Partial<DevCardCounts>) },
           knightsPlayed:   entryRaw.knightsPlayed ?? 0,
           hasLargestArmy:  false,
+          hasLongestRoad:  false,
         });
       }
       // Restore largest army holder
       const prevLargestArmy = matchRaw.largestArmyHolder;
       if (prevLargestArmy != null && stateMap.has(prevLargestArmy)) {
         stateMap.get(prevLargestArmy)!.hasLargestArmy = true;
+      }
+      // Restore longest road holder
+      const prevLongestRoad = matchRaw.longestRoadHolder;
+      if (prevLongestRoad != null && stateMap.has(prevLongestRoad)) {
+        stateMap.get(prevLongestRoad)!.hasLongestRoad = true;
       }
     } else {
       const takenNodes: number[] = [];
@@ -268,6 +315,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           devCards:        { ...EMPTY_DEV_CARDS },
           knightsPlayed:   0,
           hasLargestArmy:  false,
+          hasLongestRoad:  false,
         };
         stateMap.set(entry.agentId, state);
         await persistAgentState(matchId, entry.agentId, state);
@@ -415,6 +463,9 @@ async function runMatchSimulation(matchId: string): Promise<void> {
             s.roadEdges.push(edge);
             placed++;
           }
+          updateLongestRoad(stateMap);
+          const lrHolderRB = [...stateMap.values()].find(p => p.hasLongestRoad);
+          await prisma.match.update({ where: { id: matchId }, data: { longestRoadHolder: lrHolderRB?.agentId ?? null } });
           actionText = `plays Road Building, places ${placed} road${placed !== 1 ? 's' : ''}`;
         } else if (action.startsWith('play_monopoly:')) {
           const res = action.slice('play_monopoly:'.length) as Resource;
@@ -460,6 +511,11 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         } else {
           const result = applyAction(s, action);
           actionText = result.text;
+          if (action.startsWith('build_road:') || action.startsWith('build_settlement:') || action.startsWith('build_city:')) {
+            updateLongestRoad(stateMap);
+            const lrHolder = [...stateMap.values()].find(p => p.hasLongestRoad);
+            await prisma.match.update({ where: { id: matchId }, data: { longestRoadHolder: lrHolder?.agentId ?? null } });
+          }
         }
 
         const newVP = computeVP(s);
@@ -893,8 +949,9 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       shareToken: match.shareToken,
       robberTile: matchRaw3.robberTile ?? 9,
       standings: (() => {
-        const matchRaw2 = match as unknown as { largestArmyHolder?: number | null };
+        const matchRaw2 = match as unknown as { largestArmyHolder?: number | null; longestRoadHolder?: number | null };
         const largestArmyHolder = matchRaw2.largestArmyHolder ?? null;
+        const longestRoadHolder = matchRaw2.longestRoadHolder ?? null;
         return match.agents.map((entry) => {
           const entryRaw = entry as unknown as { knightsPlayed?: number };
           const devCards = { ...EMPTY_DEV_CARDS, ...(entry.devCards as unknown as Partial<DevCardCounts>) };
@@ -919,6 +976,7 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
             devCards,
             knightsPlayed:   entryRaw.knightsPlayed ?? 0,
             hasLargestArmy:  entry.agentId === largestArmyHolder,
+            hasLongestRoad:  entry.agentId === longestRoadHolder,
           };
         });
       })(),

@@ -36,6 +36,7 @@ export type PlayerState = {
   devCards: DevCardCounts;
   knightsPlayed: number;
   hasLargestArmy: boolean;
+  hasLongestRoad: boolean;
 };
 
 export type BoardOccupancy = {
@@ -71,7 +72,56 @@ export function totalResources(player: PlayerState): number {
 }
 
 export function computeVP(player: PlayerState): number {
-  return player.settlementNodes.length + player.cityNodes.length * 2 + player.devCards.vp + (player.hasLargestArmy ? 2 : 0);
+  return (
+    player.settlementNodes.length +
+    player.cityNodes.length * 2 +
+    player.devCards.vp +
+    (player.hasLargestArmy ? 2 : 0) +
+    (player.hasLongestRoad ? 2 : 0)
+  );
+}
+
+// DFS longest-path through player's road network.
+// Opponent settlements/cities at intermediate nodes break the chain.
+export function computeLongestRoad(
+  roadEdges: string[],
+  myOccupied: Set<number>,
+  opponentOccupied: Set<number>,
+): number {
+  if (roadEdges.length === 0) return 0;
+
+  const adj = new Map<number, number[]>();
+  for (const e of roadEdges) {
+    const a = parseInt(e.slice(0, 2), 10);
+    const b = parseInt(e.slice(2, 4), 10);
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a)!.push(b);
+    adj.get(b)!.push(a);
+  }
+  const roadSet = new Set(roadEdges);
+
+  function dfs(node: number, visited: Set<string>): number {
+    if (opponentOccupied.has(node) && !myOccupied.has(node)) return 0;
+    let best = 0;
+    for (const next of (adj.get(node) ?? [])) {
+      const e = edgeId(node, next);
+      if (!roadSet.has(e) || visited.has(e)) continue;
+      visited.add(e);
+      const sub = 1 + dfs(next, visited);
+      if (sub > best) best = sub;
+      visited.delete(e);
+    }
+    return best;
+  }
+
+  let max = 0;
+  for (const start of adj.keys()) {
+    if (opponentOccupied.has(start) && !myOccupied.has(start)) continue;
+    const len = dfs(start, new Set());
+    if (len > max) max = len;
+  }
+  return max;
 }
 
 export function collectResources(

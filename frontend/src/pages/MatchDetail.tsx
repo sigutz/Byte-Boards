@@ -1,4 +1,5 @@
-import type { MatchDetail as MatchDetailType, Standing, DevCardType } from '../types';
+import { useState } from 'react';
+import type { MatchDetail as MatchDetailType, Standing, DevCardType, MatchEvent } from '../types';
 import { PLAYER_COLORS, EVENT_STYLES } from '../types';
 import CatanBoard from '../components/CatanBoard';
 
@@ -10,7 +11,14 @@ interface Props {
   invitedBy?: string;
 }
 
-function PlayerResources({ standings, winner }: { standings: Standing[]; winner: string | null }) {
+function PlayerResources({ standings, winner, events }: { standings: Standing[]; winner: string | null; events: MatchEvent[] }) {
+  const [expanded, setExpanded] = useState(new Set<string>());
+  const toggle = (id: string) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   const sorted = [...standings].sort((a, b) => b.score - a.score);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -18,6 +26,8 @@ function PlayerResources({ standings, winner }: { standings: Standing[]; winner:
         const seatIdx = ((s.seat ?? (idx + 1)) - 1) % PLAYER_COLORS.length;
         const color = PLAYER_COLORS[seatIdx];
         const isWinner = s.name === winner;
+        const isOpen = expanded.has(s.agentId);
+        const playerEvents = events.filter(ev => ev.actor === s.name);
         return (
           <div key={s.agentId} style={{
             background: '#0d1827',
@@ -35,6 +45,16 @@ function PlayerResources({ standings, winner }: { standings: Standing[]; winner:
               }}>
                 {s.score} VP
               </span>
+              <button
+                onClick={() => toggle(s.agentId)}
+                style={{
+                  background: 'none', border: '1px solid #1a2e47', cursor: 'pointer',
+                  color: '#475569', borderRadius: 4, padding: '2px 7px',
+                  fontSize: 11, lineHeight: 1, flexShrink: 0,
+                }}
+              >
+                {isOpen ? '▲' : '▼'}
+              </button>
             </div>
             {/* Resources */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -105,12 +125,170 @@ function PlayerResources({ standings, winner }: { standings: Standing[]; winner:
                       ⚔️ Largest Army +2 VP
                     </div>
                   )}
+                  {s.hasLongestRoad && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      padding: '2px 6px', borderRadius: 4,
+                      background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.35)',
+                      fontSize: 11, color: '#818cf8', fontWeight: 700,
+                    }}>
+                      🛤️ Longest Road +2 VP
+                    </div>
+                  )}
                 </div>
               );
             })()}
+
+            {/* Per-player event log dropdown */}
+            {isOpen && (
+              <div style={{ marginTop: 10, borderTop: '1px solid #1a2e47', paddingTop: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#334155', letterSpacing: '0.1em', marginBottom: 6 }}>
+                  MOVE LOG — {playerEvents.length} events
+                </div>
+                <div style={{
+                  maxHeight: 200, overflowY: 'auto',
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                }}>
+                  {[...playerEvents].reverse().map(ev => {
+                    const st = EVENT_STYLES[ev.type] ?? EVENT_STYLES['COMMENTARY'];
+                    return (
+                      <div key={ev.id} style={{
+                        display: 'flex', gap: 6, padding: '4px 6px',
+                        borderRadius: 4, fontSize: 11, lineHeight: 1.4,
+                        background: 'rgba(255,255,255,0.015)',
+                        borderLeft: `2px solid ${st.color}30`,
+                      }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#334155', flexShrink: 0, paddingTop: 1, width: 24 }}>
+                          T{ev.turn}
+                        </span>
+                        <span style={{ color: '#94a3b8' }}>{ev.text}</span>
+                      </div>
+                    );
+                  })}
+                  {playerEvents.length === 0 && (
+                    <span style={{ fontSize: 11, color: '#334155', fontStyle: 'italic' }}>No events yet.</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function parseTurnState(events: MatchEvent[], standings: Standing[]) {
+  const currentTurn = events.reduce((max, e) => Math.max(max, e.turn), 0);
+
+  let lastDice: number | null = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const m = events[i].text.match(/Dice:\s*\d+\+\d+=(\d+)/);
+    if (m) { lastDice = parseInt(m[1], 10); break; }
+  }
+
+  let lastActor: string | null = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'MOVE' && events[i].actor) { lastActor = events[i].actor; break; }
+  }
+
+  const lastActionByPlayer = new Map<string, string>();
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (ev.type === 'MOVE' && ev.actor && !lastActionByPlayer.has(ev.actor)) {
+      const text = ev.text.startsWith(ev.actor + ' ') ? ev.text.slice(ev.actor.length + 1) : ev.text;
+      lastActionByPlayer.set(ev.actor, text);
+    }
+    if (lastActionByPlayer.size === standings.length) break;
+  }
+
+  return { currentTurn, lastDice, lastActor, lastActionByPlayer };
+}
+
+function TurnSummary({ events, standings }: { events: MatchEvent[]; standings: Standing[] }) {
+  const { currentTurn, lastDice, lastActor, lastActionByPlayer } = parseTurnState(events, standings);
+
+  const playerColors = new Map<string, string>();
+  standings.forEach((s, idx) => {
+    const seatIdx = ((s.seat ?? (idx + 1)) - 1) % PLAYER_COLORS.length;
+    playerColors.set(s.name, PLAYER_COLORS[seatIdx].hex);
+  });
+
+  return (
+    <div style={{
+      background: '#0d1827', border: '1px solid #1a2e47',
+      borderRadius: 12, padding: '14px 16px',
+    }}>
+      <div style={{
+        fontSize: 10, fontWeight: 700, color: '#334155',
+        letterSpacing: '0.1em', marginBottom: 12,
+      }}>
+        CURRENT TURN
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '8px 16px', borderRadius: 8,
+          background: 'rgba(255,255,255,0.03)', border: '1px solid #1a2e47',
+          minWidth: 60,
+        }}>
+          <span style={{ fontSize: 10, color: '#475569', letterSpacing: '0.08em', marginBottom: 4 }}>TURN</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0' }}>{currentTurn}</span>
+        </div>
+
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '8px 16px', borderRadius: 8,
+          background: lastDice === 7 ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.03)',
+          border: `1px solid ${lastDice === 7 ? 'rgba(239,68,68,0.3)' : '#1a2e47'}`,
+          minWidth: 60,
+        }}>
+          <span style={{ fontSize: 10, color: '#475569', letterSpacing: '0.08em', marginBottom: 4 }}>DICE</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: lastDice === 7 ? '#ef4444' : '#e2e8f0' }}>
+            {lastDice ?? '—'}
+          </span>
+        </div>
+
+        {lastActor && (
+          <div style={{
+            display: 'flex', flexDirection: 'column',
+            padding: '8px 14px', borderRadius: 8,
+            background: 'rgba(255,255,255,0.03)', border: '1px solid #1a2e47',
+            flex: 1,
+          }}>
+            <span style={{ fontSize: 10, color: '#475569', letterSpacing: '0.08em', marginBottom: 4 }}>LAST PLAYER</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <div style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: playerColors.get(lastActor) ?? '#64748b', flexShrink: 0,
+              }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{lastActor}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {standings.map((s, idx) => {
+          const seatIdx = ((s.seat ?? (idx + 1)) - 1) % PLAYER_COLORS.length;
+          const color = PLAYER_COLORS[seatIdx].hex;
+          const action = lastActionByPlayer.get(s.name);
+          return (
+            <div key={s.agentId} style={{
+              display: 'flex', alignItems: 'baseline', gap: 8,
+              padding: '6px 10px', borderRadius: 6,
+              background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
+            }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 3 }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#cbd5e1', flexShrink: 0, minWidth: 80 }}>{s.name}</span>
+              <span style={{ fontSize: 11, color: '#475569' }}>
+                {action ?? 'no actions yet'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -221,9 +399,13 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
         gridTemplateColumns: 'auto 1fr',
         gap: 16, marginBottom: 14, alignItems: 'start',
       }}>
-        <CatanBoard standings={match.standings} robberTile={match.robberTile ?? 9} />
+        {/* Left column: board + turn summary */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <CatanBoard standings={match.standings} robberTile={match.robberTile ?? 9} />
+          <TurnSummary events={match.events} standings={match.standings} />
+        </div>
 
-        {/* Right column: player resources + summary */}
+        {/* Right column: player resources + summary (completed only) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <div style={{
@@ -232,50 +414,51 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
             }}>
               PLAYERS
             </div>
-            <PlayerResources standings={match.standings} winner={match.winner} />
+            <PlayerResources standings={match.standings} winner={match.winner} events={match.events} />
           </div>
 
-          {/* Summary (moved here, under player panel) */}
-          <div style={{
-            background: '#0d1827', border: '1px solid #1a2e47',
-            borderRadius: 12, padding: '14px 16px',
-          }}>
+          {!isLive && (
             <div style={{
-              fontSize: 10, fontWeight: 700, color: '#334155',
-              letterSpacing: '0.1em', marginBottom: 10,
+              background: '#0d1827', border: '1px solid #1a2e47',
+              borderRadius: 12, padding: '14px 16px',
             }}>
-              MATCH SUMMARY
-            </div>
-            {!match.summary && (
-              <div style={{ fontSize: 12, color: '#334155', fontStyle: 'italic' }}>
-                {isLive ? 'Summary will appear after the match ends.' : 'No summary available.'}
+              <div style={{
+                fontSize: 10, fontWeight: 700, color: '#334155',
+                letterSpacing: '0.1em', marginBottom: 10,
+              }}>
+                MATCH SUMMARY
               </div>
-            )}
-            {overview && (
-              <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 10px', lineHeight: 1.6 }}>
-                {overview}
-              </p>
-            )}
-            {keyMoments.length > 0 && (
-              <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', letterSpacing: '0.08em', marginBottom: 6 }}>
-                  KEY MOMENTS
+              {!match.summary && (
+                <div style={{ fontSize: 12, color: '#334155', fontStyle: 'italic' }}>
+                  No summary available.
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {keyMoments.map((m, i) => (
-                    <div key={i} style={{
-                      fontSize: 12, color: '#94a3b8', padding: '4px 8px',
-                      borderLeft: '2px solid rgba(234,179,8,0.4)',
-                      background: 'rgba(234,179,8,0.04)', borderRadius: '0 4px 4px 0',
-                      lineHeight: 1.5,
-                    }}>
-                      {m}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+              )}
+              {overview && (
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 10px', lineHeight: 1.6 }}>
+                  {overview}
+                </p>
+              )}
+              {keyMoments.length > 0 && (
+                <>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', letterSpacing: '0.08em', marginBottom: 6 }}>
+                    KEY MOMENTS
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {keyMoments.map((m, i) => (
+                      <div key={i} style={{
+                        fontSize: 12, color: '#94a3b8', padding: '4px 8px',
+                        borderLeft: '2px solid rgba(234,179,8,0.4)',
+                        background: 'rgba(234,179,8,0.04)', borderRadius: '0 4px 4px 0',
+                        lineHeight: 1.5,
+                      }}>
+                        {m}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
