@@ -14,6 +14,7 @@ import {
   BOARD_TILES, RESOURCES, EMPTY_DEV_CARDS, shuffleDeck, getValidRoadEdges, computeLongestRoad,
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
+import { callGemini } from './game/gemini-client';
 import type { RobberPayload, KnightPayload } from './game/ai';
 import { BOARD_NODES, getEligibleRobberTiles } from './game/graph';
 import { ALL_TRAITS, TRAIT_DESCRIPTIONS, TRAIT_CONFLICTS, validateTraits } from './game/personality';
@@ -174,16 +175,42 @@ async function getMatchWithDetails(matchId: string) {
   });
 }
 
-function buildAutoSummary(match: NonNullable<MatchWithDetails>): string {
+async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<string> {
   const winnerName = match.winner?.name ?? 'Unknown';
-  const keyMoves = match.events
-    .filter((event) => event.type === EventType.MOVE)
-    .slice(-3)
-    .map((event) => event.text);
+  const fallback = `${winnerName} won the match.`;
 
-  return keyMoves.length > 0
-    ? `${winnerName} a câștigat meciul. Key moments: ${keyMoves.join(' | ')}`
-    : `${winnerName} a câștigat meciul.`;
+  try {
+    const standings = match.agents
+      .map(a => `${a.agent.name}: ${a.score} VP`)
+      .join(', ');
+    const totalTurns = match.events.length > 0
+      ? match.events[match.events.length - 1].turn
+      : 0;
+    const keyMoves = match.events
+      .filter(e => e.type === EventType.MOVE)
+      .slice(-6)
+      .map(e => e.text)
+      .join(' | ');
+
+    const prompt = JSON.stringify({
+      gameType: match.gameType,
+      winner: winnerName,
+      totalTurns,
+      standings,
+      keyMoves,
+    });
+
+    const raw = await callGemini(
+      prompt,
+      'You are a sports commentator summarizing a Catan board game match. Write exactly 2-3 sentences in English. Be narrative and engaging. Return plain text only, no JSON.',
+      { responseMimeType: 'text/plain', maxOutputTokens: 150, temperature: 0.8 },
+    );
+
+    const summary = raw.trim();
+    return summary.length > 10 ? summary : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function publishSse(matchId: string, payload: unknown): void {
@@ -620,7 +647,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           });
           const completed = await getMatchWithDetails(matchId);
           if (completed) {
-            await prisma.match.update({ where: { id: matchId }, data: { summary: buildAutoSummary(completed) } });
+            await prisma.match.update({ where: { id: matchId }, data: { summary: await generateAiSummary(completed) } });
           }
           publishSse(matchId, { kind: 'completed', matchId });
           return;
@@ -651,7 +678,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         });
         const completed = await getMatchWithDetails(matchId);
         if (completed) {
-          await prisma.match.update({ where: { id: matchId }, data: { summary: buildAutoSummary(completed) } });
+          await prisma.match.update({ where: { id: matchId }, data: { summary: await generateAiSummary(completed) } });
         }
         publishSse(matchId, { kind: 'completed', matchId });
         return;
