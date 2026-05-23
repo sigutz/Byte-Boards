@@ -1,7 +1,12 @@
+import {
+  BOARD_EDGES, BOARD_NODES, BOARD_TILES,
+  edgeId, getNodeTiles,
+  isValidSettlementPlacement, isValidRoadPlacement,
+} from './graph';
+import type { HexTile } from './graph';
+
 export type Resource = 'wood' | 'brick' | 'ore' | 'wheat' | 'sheep';
 export const RESOURCES: Resource[] = ['wood', 'brick', 'ore', 'wheat', 'sheep'];
-
-export type Tile = { resource: Resource; number: number };
 
 export type PlayerState = {
   agentId: number;
@@ -11,10 +16,15 @@ export type PlayerState = {
   ore: number;
   wheat: number;
   sheep: number;
-  roads: number;
-  settlements: number;
-  cities: number;
-  tiles: Tile[];
+  settlementNodes: number[];
+  cityNodes: number[];
+  roadEdges: string[];
+};
+
+export type BoardOccupancy = {
+  settlements: number[];
+  cities: number[];
+  roads: string[];
 };
 
 export const BUILD_COSTS: Record<string, Partial<Record<Resource, number>>> = {
@@ -24,39 +34,12 @@ export const BUILD_COSTS: Record<string, Partial<Record<Resource, number>>> = {
   dev_card:   { ore: 1, wheat: 1, sheep: 1 },
 };
 
-// Numbers weighted toward high-probability rolls (5,6,8,9 appear more often)
-const WEIGHTED_NUMBERS = [5, 6, 8, 9, 5, 6, 8, 9, 4, 10, 4, 10, 3, 11, 12, 2];
-
 export function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function pickRandom<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-export function createStartingTiles(): Tile[] {
-  // 5 tiles: simulates 2 settlements each touching 2-3 hexes
-  return Array.from({ length: 5 }, () => ({
-    resource: pickRandom(RESOURCES),
-    number: pickRandom(WEIGHTED_NUMBERS),
-  }));
-}
-
 export function rollDice(): [number, number] {
   return [randomInt(1, 6), randomInt(1, 6)];
-}
-
-export function collectResources(player: PlayerState, diceTotal: number): Partial<Record<Resource, number>> {
-  const gained: Partial<Record<Resource, number>> = {};
-  for (const tile of player.tiles) {
-    if (tile.number === diceTotal) {
-      // Cities produce 2 of an adjacent resource; simplified: if player has cities, +1 bonus
-      const amount = player.cities > 0 ? 2 : 1;
-      gained[tile.resource] = (gained[tile.resource] ?? 0) + amount;
-    }
-  }
-  return gained;
 }
 
 export function canAfford(player: PlayerState, cost: Partial<Record<Resource, number>>): boolean {
@@ -70,15 +53,83 @@ export function totalResources(player: PlayerState): number {
   return RESOURCES.reduce((sum, r) => sum + player[r], 0);
 }
 
-export function getValidActions(player: PlayerState): string[] {
+export function computeVP(player: PlayerState): number {
+  return player.settlementNodes.length + player.cityNodes.length * 2;
+}
+
+export function collectResources(
+  player: PlayerState,
+  diceTotal: number,
+  boardTiles: HexTile[],
+): Partial<Record<Resource, number>> {
+  const gained: Partial<Record<Resource, number>> = {};
+  for (const nodeId of player.settlementNodes) {
+    for (const tile of boardTiles) {
+      if (tile.number === diceTotal && tile.resource !== 'desert' && tile.nodes.includes(nodeId as never)) {
+        gained[tile.resource as Resource] = (gained[tile.resource as Resource] ?? 0) + 1;
+      }
+    }
+  }
+  for (const nodeId of player.cityNodes) {
+    for (const tile of boardTiles) {
+      if (tile.number === diceTotal && tile.resource !== 'desert' && tile.nodes.includes(nodeId as never)) {
+        gained[tile.resource as Resource] = (gained[tile.resource as Resource] ?? 0) + 2;
+      }
+    }
+  }
+  return gained;
+}
+
+export function getValidActions(
+  player: PlayerState,
+  _allPlayers: PlayerState[],
+  occupancy: BoardOccupancy,
+): string[] {
   const valid: string[] = ['pass'];
 
-  if (canAfford(player, BUILD_COSTS.road)) valid.push('build_road');
-  if (canAfford(player, BUILD_COSTS.settlement) && player.settlements < 5) valid.push('build_settlement');
-  if (canAfford(player, BUILD_COSTS.city) && player.settlements > 0) valid.push('build_city');
+  // Roads: edges adjacent to player's network not already occupied
+  if (canAfford(player, BUILD_COSTS.road)) {
+    const playerNodes = new Set([...player.settlementNodes, ...player.cityNodes]);
+    const playerRoadNodes = new Set(
+      player.roadEdges.flatMap(e => [parseInt(e.slice(0, 2), 10), parseInt(e.slice(2, 4), 10)])
+    );
+    const candidateNodes = new Set([...playerNodes, ...playerRoadNodes]);
+    const checkedEdges = new Set<string>();
+    for (const nodeId of candidateNodes) {
+      for (const adjNode of BOARD_NODES[nodeId].adjacentNodes) {
+        const edge = edgeId(nodeId, adjNode);
+        if (checkedEdges.has(edge)) continue;
+        checkedEdges.add(edge);
+        if (isValidRoadPlacement(edge, occupancy.roads, player.settlementNodes, player.cityNodes)) {
+          valid.push(`build_road:${edge}`);
+        }
+      }
+    }
+  }
+
+  // Settlements: road endpoints that pass the distance rule
+  if (canAfford(player, BUILD_COSTS.settlement) && player.roadEdges.length > 0) {
+    const roadEndpoints = new Set(
+      player.roadEdges.flatMap(e => [parseInt(e.slice(0, 2), 10), parseInt(e.slice(2, 4), 10)])
+    );
+    for (const nodeId of roadEndpoints) {
+      if (isValidSettlementPlacement(nodeId, occupancy.settlements, occupancy.cities)) {
+        valid.push(`build_settlement:${String(nodeId).padStart(2, '0')}`);
+      }
+    }
+  }
+
+  // Cities: upgrade any existing settlement
+  if (canAfford(player, BUILD_COSTS.city)) {
+    for (const nodeId of player.settlementNodes) {
+      valid.push(`build_city:${String(nodeId).padStart(2, '0')}`);
+    }
+  }
+
+  // Dev card
   if (canAfford(player, BUILD_COSTS.dev_card)) valid.push('buy_dev_card');
 
-  // 4:1 bank trade
+  // 4:1 bank trades
   for (const give of RESOURCES) {
     if (player[give] >= 4) {
       for (const receive of RESOURCES) {
@@ -94,19 +145,25 @@ export function applyAction(
   player: PlayerState,
   action: string,
 ): { text: string; vpDelta: number } {
-  if (action === 'build_road') {
-    player.wood -= 1; player.brick -= 1; player.roads += 1;
-    return { text: 'builds a road', vpDelta: 0 };
+  if (action.startsWith('build_road:')) {
+    const edge = action.slice('build_road:'.length);
+    player.wood -= 1; player.brick -= 1;
+    player.roadEdges.push(edge);
+    return { text: `builds a road on ${edge}`, vpDelta: 0 };
   }
-  if (action === 'build_settlement') {
+  if (action.startsWith('build_settlement:')) {
+    const nodeId = parseInt(action.slice('build_settlement:'.length), 10);
     player.wood -= 1; player.brick -= 1; player.wheat -= 1; player.sheep -= 1;
-    player.settlements += 1;
-    return { text: 'builds a settlement (+1 VP)', vpDelta: 1 };
+    player.settlementNodes.push(nodeId);
+    return { text: `builds a settlement at node ${nodeId} (+1 VP)`, vpDelta: 1 };
   }
-  if (action === 'build_city') {
+  if (action.startsWith('build_city:')) {
+    const nodeId = parseInt(action.slice('build_city:'.length), 10);
     player.wheat -= 2; player.ore -= 3;
-    player.settlements -= 1; player.cities += 1;
-    return { text: 'upgrades a settlement to a city (+1 VP)', vpDelta: 1 };
+    const idx = player.settlementNodes.indexOf(nodeId);
+    if (idx !== -1) player.settlementNodes.splice(idx, 1);
+    player.cityNodes.push(nodeId);
+    return { text: `upgrades node ${nodeId} to a city (+1 VP)`, vpDelta: 1 };
   }
   if (action === 'buy_dev_card') {
     player.ore -= 1; player.wheat -= 1; player.sheep -= 1;
@@ -120,11 +177,7 @@ export function applyAction(
   return { text: 'passes their turn', vpDelta: 0 };
 }
 
-export function computeVP(player: PlayerState): number {
-  return player.settlements + player.cities * 2;
-}
-
-// Roll of 7: players with ≥7 resources discard half; simplest robber
+// Roll of 7: players with ≥7 resources discard half
 export function handleRobber(players: PlayerState[]): string {
   const msgs: string[] = [];
   for (const p of players) {
@@ -142,3 +195,41 @@ export function handleRobber(players: PlayerState[]): string {
   }
   return msgs.length > 0 ? msgs.join(', ') : 'no discards';
 }
+
+export function createInitialPlacement(
+  takenNodes: number[],
+  takenEdges: string[],
+): { settlementNodes: number[]; cityNodes: number[]; roadEdges: string[] } {
+  // Shuffle all node IDs
+  const allNodes = Array.from({ length: 54 }, (_, i) => i)
+    .sort(() => Math.random() - 0.5);
+
+  const localTaken = [...takenNodes];
+  const localTakenEdges = [...takenEdges];
+  const settlementNodes: number[] = [];
+  const roadEdges: string[] = [];
+
+  for (const nodeId of allNodes) {
+    if (settlementNodes.length >= 2) break;
+    if (isValidSettlementPlacement(nodeId, localTaken, [])) {
+      settlementNodes.push(nodeId);
+      localTaken.push(nodeId);
+
+      // Pick a random adjacent edge for this settlement
+      const adjEdges = BOARD_NODES[nodeId].adjacentNodes
+        .map(adj => edgeId(nodeId, adj))
+        .filter(e => BOARD_EDGES.has(e) && !localTakenEdges.includes(e));
+
+      if (adjEdges.length > 0) {
+        const road = adjEdges[Math.floor(Math.random() * adjEdges.length)];
+        roadEdges.push(road);
+        localTakenEdges.push(road);
+      }
+    }
+  }
+
+  return { settlementNodes, cityNodes: [], roadEdges };
+}
+
+// Re-export graph helpers consumed by index.ts
+export { BOARD_TILES, BOARD_NODES } from './graph';
