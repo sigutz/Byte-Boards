@@ -95,6 +95,21 @@ model MatchEvent {
   actor     Agent?    @relation("EventActor", fields: [actorId], references: [id], onDelete: SetNull)
 }
 
+model Trait {
+  id          Int             @id @default(autoincrement())
+  name        String          @unique
+  description String
+  conflictsAs TraitConflict[] @relation("ConflictSource")
+}
+
+model TraitConflict {
+  sourceId Int
+  targetId Int
+  source   Trait @relation("ConflictSource", fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, targetId])
+}
+
 enum MatchStatus {
   PENDING
   LIVE

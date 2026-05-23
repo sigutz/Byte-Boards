@@ -1,13 +1,19 @@
-export type Trait = 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive';
+export type Trait =
+  | 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive'
+  | 'SmartBuilder' | 'FastSpender' | 'DevFocused';
 
 export const ALL_TRAITS: Trait[] = [
   'Empathic', 'Greedy', 'HardTrader', 'Aggressive', 'Expansionist', 'Defensive',
+  'SmartBuilder', 'FastSpender', 'DevFocused',
 ];
 
 const CONFLICTS: Partial<Record<Trait, Trait[]>> = {
   Empathic:     ['Aggressive', 'Greedy'],
   Aggressive:   ['Empathic', 'Defensive'],
-  Expansionist: ['Defensive'],
+  Expansionist: ['Defensive', 'DevFocused'],
+  SmartBuilder: ['FastSpender', 'Greedy'],
+  FastSpender:  ['SmartBuilder', 'DevFocused'],
+  DevFocused:   ['FastSpender', 'Expansionist'],
 };
 
 export function validateTraits(traits: Trait[]): boolean {
@@ -50,6 +56,9 @@ export const TRAIT_DESCRIPTIONS: Record<Trait, string> = {
   Aggressive:   'You block opponents and claim territory before them.',
   Expansionist: 'You spread settlements and roads to dominate the board.',
   Defensive:    'You secure existing positions before expanding further.',
+  SmartBuilder: 'You save resources patiently and only build when you can afford the optimal structure.',
+  FastSpender:  'You spend resources immediately whenever any build action is available.',
+  DevFocused:   'You prioritize buying development cards over physical buildings and save towards them.',
 };
 
 export const TRAIT_CONFLICTS: Partial<Record<Trait, Trait[]>> = CONFLICTS;

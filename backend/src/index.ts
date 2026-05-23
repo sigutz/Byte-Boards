@@ -98,6 +98,35 @@ async function seedAgentsIfNeeded(): Promise<void> {
   await prisma.agent.createMany({ data: DEFAULT_AGENTS });
 }
 
+async function seedTraitsIfNeeded(): Promise<void> {
+  const existing = await prisma.trait.count();
+  if (existing >= ALL_TRAITS.length) return;
+
+  for (const name of ALL_TRAITS) {
+    await prisma.trait.upsert({
+      where: { name },
+      update: { description: TRAIT_DESCRIPTIONS[name] },
+      create: { name, description: TRAIT_DESCRIPTIONS[name] },
+    });
+  }
+
+  const rows = await prisma.trait.findMany({ select: { id: true, name: true } });
+  const idOf = Object.fromEntries(rows.map(r => [r.name, r.id]));
+
+  type TraitName = keyof typeof TRAIT_CONFLICTS;
+  for (const [a, bList] of Object.entries(TRAIT_CONFLICTS) as [TraitName, TraitName[]][]) {
+    for (const b of (bList ?? [])) {
+      const aId = idOf[a];
+      const bId = idOf[b];
+      if (!aId || !bId) continue;
+      await prisma.traitConflict.createMany({
+        data: [{ sourceId: aId, targetId: bId }, { sourceId: bId, targetId: aId }],
+        skipDuplicates: true,
+      });
+    }
+  }
+}
+
 async function getMatchWithDetails(matchId: string) {
   return prisma.match.findUnique({
     where: { id: matchId },
@@ -748,14 +777,29 @@ app.get('/api/game-types', (req: Request, res: Response) => {
   res.json(GAME_TYPES);
 });
 
-app.get('/api/traits', (_req: Request, res: Response) => {
-  res.json(
-    ALL_TRAITS.map(t => ({
-      name: t,
-      description: TRAIT_DESCRIPTIONS[t],
-      conflicts: TRAIT_CONFLICTS[t] ?? [],
-    }))
-  );
+app.get('/api/traits', async (_req: Request, res: Response) => {
+  try {
+    const traits = await prisma.trait.findMany({
+      orderBy: { id: 'asc' },
+      include: { conflictsAs: true },
+    });
+    if (traits.length === 0) {
+      // DB not seeded yet — fall back to in-memory data
+      return res.json(ALL_TRAITS.map(t => ({
+        name: t, description: TRAIT_DESCRIPTIONS[t], conflicts: TRAIT_CONFLICTS[t] ?? [],
+      })));
+    }
+    const idToName = Object.fromEntries(traits.map(t => [t.id, t.name]));
+    return res.json(traits.map(t => ({
+      name: t.name,
+      description: t.description,
+      conflicts: t.conflictsAs.map(c => idToName[c.targetId]).filter(Boolean),
+    })));
+  } catch {
+    return res.json(ALL_TRAITS.map(t => ({
+      name: t, description: TRAIT_DESCRIPTIONS[t], conflicts: TRAIT_CONFLICTS[t] ?? [],
+    })));
+  }
 });
 
 app.get('/api/agents', async (req: Request, res: Response) => {
@@ -785,10 +829,28 @@ app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
     if (!name || name.length < 2 || name.length > 32) {
       res.status(400).json({ error: 'Name must be 2–32 characters' }); return;
     }
-    if (!Array.isArray(traits) || traits.some(t => !ALL_TRAITS.includes(t))) {
+    // Validate against DB (with in-memory fallback)
+    const dbTraits = await prisma.trait.findMany({ include: { conflictsAs: true } }).catch(() => []);
+    const validTraitNames = dbTraits.length > 0
+      ? dbTraits.map(t => t.name)
+      : (ALL_TRAITS as string[]);
+
+    if (!Array.isArray(traits) || traits.some(t => !validTraitNames.includes(t))) {
       res.status(400).json({ error: 'Invalid traits' }); return;
     }
-    if (!validateTraits(traits)) {
+
+    if (dbTraits.length > 0) {
+      const idOf = Object.fromEntries(dbTraits.map(t => [t.name, t.id]));
+      const selectedIds = new Set(traits.map(t => idOf[t]).filter(Boolean));
+      for (const trait of dbTraits) {
+        if (!selectedIds.has(trait.id)) continue;
+        for (const c of trait.conflictsAs) {
+          if (selectedIds.has(c.targetId)) {
+            res.status(400).json({ error: 'Conflicting traits selected' }); return;
+          }
+        }
+      }
+    } else if (!validateTraits(traits as Trait[])) {
       res.status(400).json({ error: 'Conflicting traits selected' }); return;
     }
 
@@ -1151,6 +1213,9 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   seedAgentsIfNeeded().catch((error) => {
     console.error('Failed to seed agents:', error);
+  });
+  seedTraitsIfNeeded().catch((error) => {
+    console.error('Failed to seed traits:', error);
   });
   prisma.match.findMany({ where: { status: MatchStatus.LIVE } }).then((liveMatches) => {
     for (const match of liveMatches) {

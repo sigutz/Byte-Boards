@@ -28,6 +28,9 @@ const TRAIT_COLORS: Record<Trait, { hex: string; bg: string }> = {
   HardTrader:   { hex: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
   Aggressive:   { hex: '#f87171', bg: 'rgba(248,113,113,0.12)' },
   Expansionist: { hex: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  SmartBuilder: { hex: '#2dd4bf', bg: 'rgba(45,212,191,0.12)' },
+  FastSpender:  { hex: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
+  DevFocused:   { hex: '#e879f9', bg: 'rgba(232,121,249,0.12)' },
   Defensive:    { hex: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
 };
 

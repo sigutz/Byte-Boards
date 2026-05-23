@@ -79,7 +79,9 @@ export type AgentMetric = {
   averageScore: number;
 };
 
-export type Trait = 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive';
+export type Trait =
+  | 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive'
+  | 'SmartBuilder' | 'FastSpender' | 'DevFocused';
 
 export type TraitInfo = {
   name: Trait;
