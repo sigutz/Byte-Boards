@@ -17,11 +17,19 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          GEMINI_1: ${{ secrets.GEMINI_1 }}
+          GEMINI_2: ${{ secrets.GEMINI_2 }}
+          GEMINI_3: ${{ secrets.GEMINI_3 }}
+          GEMINI_4: ${{ secrets.GEMINI_4 }}
+          GEMINI_5: ${{ secrets.GEMINI_5 }}
+          GEMINI_6: ${{ secrets.GEMINI_6 }}
+          GEMINI_7: ${{ secrets.GEMINI_7 }}
+          GEMINI_8: ${{ secrets.GEMINI_8 }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: DATABASE_URL,JWT_SECRET,VITE_API_BASE_URL
+          envs: DATABASE_URL,JWT_SECRET,VITE_API_BASE_URL,GEMINI_1,GEMINI_2,GEMINI_3,GEMINI_4,GEMINI_5,GEMINI_6,GEMINI_7,GEMINI_8
           script: |
             set -e
 
@@ -37,7 +45,19 @@ jobs:
             fi
 
             echo "── Writing .env from secrets ──"
-            printf "DATABASE_URL=%s\nJWT_SECRET=%s\nVITE_API_BASE_URL=%s\n" "$DATABASE_URL" "$JWT_SECRET" "$VITE_API_BASE_URL" > .env
+            {
+              echo "DATABASE_URL=$DATABASE_URL"
+              echo "JWT_SECRET=$JWT_SECRET"
+              echo "VITE_API_BASE_URL=$VITE_API_BASE_URL"
+              echo "GEMINI_1=$GEMINI_1"
+              echo "GEMINI_2=$GEMINI_2"
+              echo "GEMINI_3=$GEMINI_3"
+              echo "GEMINI_4=$GEMINI_4"
+              echo "GEMINI_5=$GEMINI_5"
+              echo "GEMINI_6=$GEMINI_6"
+              echo "GEMINI_7=$GEMINI_7"
+              echo "GEMINI_8=$GEMINI_8"
+            } > .env
 
             echo "── Bringing down old containers ──"
             docker compose down --remove-orphans
