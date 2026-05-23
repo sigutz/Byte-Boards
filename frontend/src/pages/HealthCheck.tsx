@@ -58,14 +58,16 @@ export default function HealthCheck({ navigate }: { navigate: (path: string) => 
     setStatus('loading');
     setData(null);
     setBackendReachable(null);
+    let reached = false;
     try {
       const res = await fetch(`${API_BASE}/api/health`);
+      reached = true;
       setBackendReachable(true);
       const json = await res.json() as HealthData;
       setData(json);
       setStatus('ok');
-    } catch {
-      setBackendReachable(false);
+    } catch (e) {
+      setBackendReachable(reached ? true : false);
       setStatus('error');
     }
   }
