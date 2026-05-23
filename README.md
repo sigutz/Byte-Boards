@@ -80,3 +80,5 @@ docker compose -f docker-compose.dev.yml down -v
 ```bash
 docker exec bytenboard-backend-dev npx prisma migrate dev --name descriere_modificare
 ```
+
+
