@@ -43,7 +43,7 @@ export function getAgentTraits(agentName: string): Trait[] {
   return FIXED_TRAITS[agentName] ?? randomTraits(2);
 }
 
-const TRAIT_DESCRIPTIONS: Record<Trait, string> = {
+export const TRAIT_DESCRIPTIONS: Record<Trait, string> = {
   Empathic:     'You cooperate when it benefits long-term standing and avoid hostile moves.',
   Greedy:       'You maximize your own resource accumulation above all else.',
   HardTrader:   'You exploit 4:1 bank trades aggressively whenever you have surplus.',
@@ -51,6 +51,8 @@ const TRAIT_DESCRIPTIONS: Record<Trait, string> = {
   Expansionist: 'You spread settlements and roads to dominate the board.',
   Defensive:    'You secure existing positions before expanding further.',
 };
+
+export const TRAIT_CONFLICTS: Partial<Record<Trait, Trait[]>> = CONFLICTS;
 
 export function buildSystemPrompt(agentName: string, traits: Trait[]): string {
   const traitText = traits.map(t => TRAIT_DESCRIPTIONS[t]).join(' ');

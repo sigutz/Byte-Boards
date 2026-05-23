@@ -11,6 +11,9 @@ export type MatchListItem = {
   createdBy: string | null;
 };
 
+export type DevCardType = 'knight' | 'vp' | 'road_building' | 'year_of_plenty' | 'monopoly';
+export type DevCardCounts = Record<DevCardType, number>;
+
 export type Standing = {
   agentId: string;
   name: string;
@@ -26,6 +29,12 @@ export type Standing = {
   roads?: number;
   settlements?: number;
   cities?: number;
+  settlementNodes?: number[];
+  cityNodes?: number[];
+  roadEdges?: string[];
+  devCards?: DevCardCounts;
+  knightsPlayed?: number;
+  hasLargestArmy?: boolean;
 };
 
 export type MatchEvent = {
@@ -67,10 +76,19 @@ export type AgentMetric = {
   averageScore: number;
 };
 
+export type Trait = 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive';
+
+export type TraitInfo = {
+  name: Trait;
+  description: string;
+  conflicts: Trait[];
+};
+
 export type Agent = {
   id: number;
   name: string;
   description: string | null;
+  traits: Trait[];
 };
 
 export type User = {

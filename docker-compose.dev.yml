@@ -24,6 +24,14 @@ services:
     environment:
       DATABASE_URL: "postgresql://admin:admin@db:5432/postgres?schema=public"
       JWT_SECRET: "byte-boards-secret-change-in-production"
+      GEMINI_1: "${GEMINI_1:-}"
+      GEMINI_2: "${GEMINI_2:-}"
+      GEMINI_3: "${GEMINI_3:-}"
+      GEMINI_4: "${GEMINI_4:-}"
+      GEMINI_5: "${GEMINI_5:-}"
+      GEMINI_6: "${GEMINI_6:-}"
+      GEMINI_7: "${GEMINI_7:-}"
+      GEMINI_8: "${GEMINI_8:-}"
     ports:
       - "5000:5000"
     depends_on:
@@ -31,7 +39,10 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: "http://localhost:5000"
     container_name: byte_boards_frontend
     restart: unless-stopped
     ports:

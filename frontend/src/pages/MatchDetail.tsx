@@ -1,5 +1,6 @@
-import type { MatchDetail as MatchDetailType } from '../types';
-import { PLAYER_COLORS, EVENT_STYLES, TARGET_SCORE } from '../types';
+import type { MatchDetail as MatchDetailType, Standing, DevCardType } from '../types';
+import { PLAYER_COLORS, EVENT_STYLES } from '../types';
+import CatanBoard from '../components/CatanBoard';
 
 interface Props {
   match: MatchDetailType | null;
@@ -9,18 +10,107 @@ interface Props {
   invitedBy?: string;
 }
 
-function VPBar({ score, color }: { score: number; color: string }) {
-  const pct = Math.min((score / TARGET_SCORE) * 100, 100);
+function PlayerResources({ standings, winner }: { standings: Standing[]; winner: string | null }) {
+  const sorted = [...standings].sort((a, b) => b.score - a.score);
   return (
-    <div style={{ height: 6, borderRadius: 3, background: '#1a2e47', overflow: 'hidden', flex: 1 }}>
-      <div
-        className="vp-bar-fill"
-        style={{
-          height: '100%', width: `${pct}%`, borderRadius: 3,
-          background: `linear-gradient(90deg, ${color}77, ${color})`,
-          transition: 'width 0.5s ease',
-        }}
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {sorted.map((s, idx) => {
+        const seatIdx = ((s.seat ?? (idx + 1)) - 1) % PLAYER_COLORS.length;
+        const color = PLAYER_COLORS[seatIdx];
+        const isWinner = s.name === winner;
+        return (
+          <div key={s.agentId} style={{
+            background: '#0d1827',
+            border: `1px solid ${isWinner ? 'rgba(234,179,8,0.4)' : '#1a2e47'}`,
+            borderRadius: 10, padding: '11px 14px',
+          }}>
+            {/* Name row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              {isWinner && <span style={{ fontSize: 14 }}>🏆</span>}
+              <div style={{ width: 9, height: 9, borderRadius: '50%', background: color.hex, flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', flex: 1 }}>{s.name}</span>
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: color.hex,
+                background: color.bg, padding: '1px 7px', borderRadius: 4,
+              }}>
+                {s.score} VP
+              </span>
+            </div>
+            {/* Resources */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+              {([
+                { icon: '🪵', val: s.wood  ?? 0, label: 'wood'  },
+                { icon: '🧱', val: s.brick ?? 0, label: 'brick' },
+                { icon: '⛏️', val: s.ore   ?? 0, label: 'ore'   },
+                { icon: '🌾', val: s.wheat ?? 0, label: 'wheat' },
+                { icon: '🐑', val: s.sheep ?? 0, label: 'sheep' },
+              ] as const).map(({ icon, val, label }) => (
+                <div key={label} style={{
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  padding: '3px 7px', borderRadius: 5,
+                  background: val > 0 ? 'rgba(255,255,255,0.05)' : 'transparent',
+                  border: val > 0 ? '1px solid rgba(255,255,255,0.07)' : '1px solid transparent',
+                  minWidth: 36,
+                }}>
+                  <span style={{ fontSize: 12 }}>{icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: val > 0 ? 700 : 400, color: val > 0 ? '#cbd5e1' : '#334155' }}>
+                    {val}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* Buildings row */}
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#475569', marginBottom: 5 }}>
+              <span>🏠 {s.settlements ?? (s.settlementNodes?.length ?? 2)}</span>
+              <span>🏙️ {s.cities ?? (s.cityNodes?.length ?? 0)}</span>
+              <span>🛤️ {s.roads ?? (s.roadEdges?.length ?? 0)}</span>
+            </div>
+            {/* Dev cards */}
+            {s.devCards && (() => {
+              const dc = s.devCards;
+              const devItems: { icon: string; label: string; key: DevCardType }[] = [
+                { icon: '⚔️', label: 'Knight', key: 'knight' },
+                { icon: '🌟', label: 'VP', key: 'vp' },
+                { icon: '🛤️', label: 'Road', key: 'road_building' },
+                { icon: '🎁', label: 'Plenty', key: 'year_of_plenty' },
+                { icon: '🎭', label: 'Mono', key: 'monopoly' },
+              ];
+              const activeItems = devItems.filter(d => dc[d.key] > 0);
+              if (activeItems.length === 0 && !s.hasLargestArmy && (s.knightsPlayed ?? 0) === 0) return null;
+              return (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {activeItems.map(d => (
+                    <div key={d.key} style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      padding: '2px 6px', borderRadius: 4,
+                      background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)',
+                      fontSize: 11, color: '#a78bfa',
+                    }}>
+                      <span style={{ fontSize: 11 }}>{d.icon}</span>
+                      <span>{d.label} ×{dc[d.key]}</span>
+                    </div>
+                  ))}
+                  {(s.knightsPlayed ?? 0) > 0 && (
+                    <div style={{ fontSize: 10, color: '#64748b' }}>
+                      {s.knightsPlayed} knight{(s.knightsPlayed ?? 0) !== 1 ? 's' : ''} played
+                    </div>
+                  )}
+                  {s.hasLargestArmy && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      padding: '2px 6px', borderRadius: 4,
+                      background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)',
+                      fontSize: 11, color: '#eab308', fontWeight: 700,
+                    }}>
+                      ⚔️ Largest Army +2 VP
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -47,10 +137,9 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
 
   const isLive = match.status === 'LIVE';
   const { overview, keyMoments } = splitSummary(match.summary);
-  const sortedStandings = [...match.standings].sort((a, b) => b.score - a.score);
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px' }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px' }}>
       {invitedBy && (
         <div style={{
           marginBottom: 16, padding: '10px 16px', borderRadius: 8,
@@ -126,97 +215,67 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-        {/* Standings */}
-        <div style={{
-          background: '#0d1827', border: '1px solid #1a2e47',
-          borderRadius: 12, padding: '16px 18px',
-        }}>
-          <div style={{
-            fontSize: 10, fontWeight: 700, color: '#334155',
-            letterSpacing: '0.1em', marginBottom: 14,
-          }}>
-            FINAL STANDINGS
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {sortedStandings.map((entry, idx) => {
-              const seatIdx = ((entry.seat ?? (idx + 1)) - 1) % PLAYER_COLORS.length;
-              const color = PLAYER_COLORS[seatIdx];
-              const isWinner = match.winner === entry.name;
-              return (
-                <div key={entry.agentId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    width: 22, fontSize: 14, fontWeight: 700, flexShrink: 0,
-                    color: isWinner ? '#eab308' : '#334155',
-                  }}>
-                    {isWinner ? '🏆' : `#${idx + 1}`}
-                  </div>
-                  <div style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: color.hex, flexShrink: 0,
-                  }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', marginBottom: 4 }}>
-                      {entry.name}
-                    </div>
-                    <VPBar score={entry.score} color={color.hex} />
-                  </div>
-                  <div style={{
-                    fontSize: 14, fontWeight: 700, color: color.hex,
-                    flexShrink: 0, width: 44, textAlign: 'right',
-                  }}>
-                    {entry.score}
-                    <span style={{ fontSize: 10, fontWeight: 400, color: '#334155' }}>VP</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      {/* ── Board + Player resources ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr',
+        gap: 16, marginBottom: 14, alignItems: 'start',
+      }}>
+        <CatanBoard standings={match.standings} />
 
-        {/* Summary */}
-        <div style={{
-          background: '#0d1827', border: '1px solid #1a2e47',
-          borderRadius: 12, padding: '16px 18px',
-        }}>
-          <div style={{
-            fontSize: 10, fontWeight: 700, color: '#334155',
-            letterSpacing: '0.1em', marginBottom: 12,
-          }}>
-            MATCH SUMMARY
-          </div>
-          {!match.summary && (
-            <div style={{ fontSize: 13, color: '#334155', fontStyle: 'italic' }}>
-              {isLive ? 'Summary will appear after the match ends.' : 'No summary available.'}
+        {/* Right column: player resources + summary */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: '#334155',
+              letterSpacing: '0.1em', marginBottom: 10,
+            }}>
+              PLAYERS
             </div>
-          )}
-          {overview && (
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px', lineHeight: 1.6 }}>
-              {overview}
-            </p>
-          )}
-          {keyMoments.length > 0 && (
-            <>
-              <div style={{
-                fontSize: 10, fontWeight: 700, color: '#334155',
-                letterSpacing: '0.08em', marginBottom: 8,
-              }}>
-                KEY MOMENTS
+            <PlayerResources standings={match.standings} winner={match.winner} />
+          </div>
+
+          {/* Summary (moved here, under player panel) */}
+          <div style={{
+            background: '#0d1827', border: '1px solid #1a2e47',
+            borderRadius: 12, padding: '14px 16px',
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: '#334155',
+              letterSpacing: '0.1em', marginBottom: 10,
+            }}>
+              MATCH SUMMARY
+            </div>
+            {!match.summary && (
+              <div style={{ fontSize: 12, color: '#334155', fontStyle: 'italic' }}>
+                {isLive ? 'Summary will appear after the match ends.' : 'No summary available.'}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {keyMoments.map((m, i) => (
-                  <div key={i} style={{
-                    fontSize: 12, color: '#94a3b8', padding: '5px 8px',
-                    borderLeft: '2px solid rgba(234,179,8,0.4)',
-                    background: 'rgba(234,179,8,0.04)', borderRadius: '0 5px 5px 0',
-                    lineHeight: 1.5,
-                  }}>
-                    {m}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+            )}
+            {overview && (
+              <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 10px', lineHeight: 1.6 }}>
+                {overview}
+              </p>
+            )}
+            {keyMoments.length > 0 && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', letterSpacing: '0.08em', marginBottom: 6 }}>
+                  KEY MOMENTS
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {keyMoments.map((m, i) => (
+                    <div key={i} style={{
+                      fontSize: 12, color: '#94a3b8', padding: '4px 8px',
+                      borderLeft: '2px solid rgba(234,179,8,0.4)',
+                      background: 'rgba(234,179,8,0.04)', borderRadius: '0 4px 4px 0',
+                      lineHeight: 1.5,
+                    }}>
+                      {m}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

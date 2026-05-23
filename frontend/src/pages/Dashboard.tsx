@@ -1,5 +1,6 @@
-import type { Agent, AgentMetric, MatchDetail } from '../types';
-import { PLAYER_COLORS, EVENT_STYLES, TARGET_SCORE } from '../types';
+import { useState as useLocalState } from 'react';
+import type { Agent, AgentMetric, MatchDetail, Trait, TraitInfo } from '../types';
+import { PLAYER_COLORS, EVENT_STYLES, TARGET_SCORE, apiFetch } from '../types';
 
 interface Props {
   gameTypes: string[];
@@ -18,6 +19,171 @@ interface Props {
   linkCopied: boolean;
   navigate: (path: string) => void;
   error: string;
+  onAgentCreated: () => void;
+}
+
+const TRAIT_COLORS: Record<Trait, { hex: string; bg: string }> = {
+  Empathic:     { hex: '#34d399', bg: 'rgba(52,211,153,0.12)' },
+  Greedy:       { hex: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  HardTrader:   { hex: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
+  Aggressive:   { hex: '#f87171', bg: 'rgba(248,113,113,0.12)' },
+  Expansionist: { hex: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  Defensive:    { hex: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
+};
+
+function BotCreator({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useLocalState(false);
+  const [name, setName] = useLocalState('');
+  const [description, setDescription] = useLocalState('');
+  const [selectedTraits, setSelectedTraits] = useLocalState<Trait[]>([]);
+  const [traitInfos, setTraitInfos] = useLocalState<TraitInfo[]>([]);
+  const [saving, setSaving] = useLocalState(false);
+  const [err, setErr] = useLocalState('');
+
+  async function fetchTraits() {
+    if (traitInfos.length > 0) return;
+    try {
+      const data = await apiFetch<TraitInfo[]>('/api/traits');
+      setTraitInfos(data);
+    } catch { /* ignore */ }
+  }
+
+  function toggleTrait(t: Trait) {
+    setSelectedTraits(cur => {
+      if (cur.includes(t)) return cur.filter(x => x !== t);
+      if (cur.length >= 3) return cur;
+      return [...cur, t];
+    });
+    setErr('');
+  }
+
+  function isConflicting(t: Trait): boolean {
+    const info = traitInfos.find(i => i.name === t);
+    if (!info) return false;
+    return selectedTraits.some(s => info.conflicts.includes(s) || traitInfos.find(i => i.name === s)?.conflicts.includes(t));
+  }
+
+  async function save() {
+    setErr('');
+    if (!name.trim()) { setErr('Enter a name'); return; }
+    setSaving(true);
+    try {
+      await apiFetch('/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), description: description.trim() || null, traits: selectedTraits }),
+      });
+      setName(''); setDescription(''); setSelectedTraits([]); setOpen(false);
+      onCreated();
+    } catch (e) {
+      setErr((e as Error).message ?? 'Could not create agent');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => { setOpen(o => !o); void fetchTraits(); }}
+        style={{
+          width: '100%', padding: '7px 10px', borderRadius: 7, fontSize: 12,
+          border: '1px dashed #1a3a5c', background: 'transparent',
+          color: '#334155', cursor: 'pointer', textAlign: 'left',
+          transition: 'all 0.15s',
+        }}
+      >
+        {open ? '✕ Cancel' : '+ Create Bot'}
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: 8, padding: 12, borderRadius: 8,
+          background: '#0a1520', border: '1px solid #1a2e47',
+          display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Bot name…"
+            maxLength={32}
+            style={{
+              background: '#0d1827', border: '1px solid #1a2e47', borderRadius: 6,
+              padding: '6px 9px', color: '#f1f5f9', fontSize: 13, outline: 'none',
+            }}
+          />
+          <input
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="Description (optional)"
+            maxLength={80}
+            style={{
+              background: '#0d1827', border: '1px solid #1a2e47', borderRadius: 6,
+              padding: '6px 9px', color: '#94a3b8', fontSize: 12, outline: 'none',
+            }}
+          />
+
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', letterSpacing: '0.08em' }}>
+            PERSONALITY TRAITS (pick up to 3)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {traitInfos.map(info => {
+              const selected = selectedTraits.includes(info.name);
+              const conflicting = !selected && isConflicting(info.name);
+              const c = TRAIT_COLORS[info.name];
+              return (
+                <button
+                  key={info.name}
+                  onClick={() => !conflicting && toggleTrait(info.name)}
+                  title={info.description}
+                  style={{
+                    padding: '6px 9px', borderRadius: 6, textAlign: 'left',
+                    border: selected ? `1px solid ${c.hex}66` : `1px solid ${conflicting ? '#1a1a2e' : '#1a2e47'}`,
+                    background: selected ? c.bg : conflicting ? '#05080d' : 'transparent',
+                    cursor: conflicting ? 'not-allowed' : 'pointer',
+                    opacity: conflicting ? 0.35 : 1,
+                    transition: 'all 0.12s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <div style={{
+                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                      background: selected ? c.hex : '#1a2e47',
+                    }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: selected ? c.hex : '#475569' }}>
+                      {info.name}
+                    </span>
+                    {info.conflicts.length > 0 && (
+                      <span style={{ fontSize: 10, color: '#243d5a', marginLeft: 'auto' }}>
+                        ✗ {info.conflicts.join(', ')}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#334155', paddingLeft: 14, marginTop: 2 }}>
+                    {info.description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {err && <div style={{ fontSize: 11, color: '#f87171' }}>{err}</div>}
+
+          <button
+            onClick={() => void save()}
+            disabled={saving || !name.trim()}
+            style={{
+              padding: '8px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+              border: 'none', cursor: saving || !name.trim() ? 'not-allowed' : 'pointer',
+              background: saving || !name.trim()
+                ? 'rgba(217,119,6,0.08)'
+                : 'linear-gradient(135deg, #d97706, #b45309)',
+              color: saving || !name.trim() ? '#7c4a00' : 'white',
+            }}
+          >
+            {saving ? 'Creating…' : 'Create Bot'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: 'LIVE' | 'PAUSED' | 'COMPLETED' }) {
@@ -85,6 +251,7 @@ export default function Dashboard({
   agents, metrics, selectedAgentIds, toggleAgent,
   isCreatingMatch, hasLiveMatch, startMatch, onPauseResume,
   selectedMatch, copyShareLink, linkCopied, navigate, error,
+  onAgentCreated,
 }: Props) {
   const selectedCount = selectedAgentIds.length;
 
@@ -201,6 +368,21 @@ export default function Dashboard({
                             {metric.wins}W/{metric.gamesPlayed}G · {Math.round(metric.winRate * 100)}% WR
                           </div>
                         )}
+                        {agent.traits && agent.traits.length > 0 && (
+                          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 3 }}>
+                            {agent.traits.map(t => (
+                              <span key={t} style={{
+                                fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                                padding: '1px 5px', borderRadius: 3,
+                                background: TRAIT_COLORS[t].bg,
+                                color: TRAIT_COLORS[t].hex,
+                                border: `1px solid ${TRAIT_COLORS[t].hex}33`,
+                              }}>
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       {selected && (
                         <span style={{
@@ -215,6 +397,8 @@ export default function Dashboard({
                 );
               })}
             </div>
+
+            <BotCreator onCreated={onAgentCreated} />
 
             <button
               onClick={() => void startMatch()}

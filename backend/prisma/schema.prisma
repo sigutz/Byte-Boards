@@ -25,6 +25,7 @@ model Agent {
   id          Int          @id @default(autoincrement())
   name        String       @unique
   description String?
+  traits      Json         @default("[]")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   wonMatches  Match[]      @relation("MatchWinner")
@@ -41,9 +42,11 @@ model Match {
   endedAt    DateTime?
   winnerId   Int?
   summary    String?
-  shareToken  String       @unique @default(cuid())
-  robberTile  Int          @default(9)
-  createdById Int?
+  shareToken        String       @unique @default(cuid())
+  robberTile        Int          @default(9)
+  devDeck           Json         @default("[]")
+  largestArmyHolder Int?
+  createdById       Int?
   winner      Agent?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
   createdBy   User?        @relation("MatchCreator", fields: [createdById], references: [id], onDelete: SetNull)
   agents      MatchAgent[]
@@ -69,6 +72,8 @@ model MatchAgent {
   settlementNodes Json   @default("[]")
   cityNodes       Json   @default("[]")
   roadEdges       Json   @default("[]")
+  devCards        Json   @default("{}")
+  knightsPlayed   Int    @default(0)
   match       Match       @relation(fields: [matchId], references: [id], onDelete: Cascade)
   agent       Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
