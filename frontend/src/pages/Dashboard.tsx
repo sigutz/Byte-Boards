@@ -77,6 +77,7 @@ function BotCreator({ onCreated }: { onCreated: () => void }) {
     } catch (e) {
       setErr((e as Error).message ?? 'Could not create agent');
     } finally { setSaving(false); }
+    
   }
 
   return (
