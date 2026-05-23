@@ -55,6 +55,7 @@ export type MatchDetail = {
   winner: string | null;
   summary: string | null;
   shareToken: string;
+  robberTile: number;
   standings: Standing[];
   events: MatchEvent[];
 };

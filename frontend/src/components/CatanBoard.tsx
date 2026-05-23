@@ -3,12 +3,12 @@ import type { Standing } from '../types';
 import { PLAYER_COLORS } from '../types';
 
 // ── Board geometry ────────────────────────────────────────────────────────────
-const R = 44;                    // hex circumradius (center → vertex)
+const R = 44;
 const SQRT3 = Math.sqrt(3);
-const PAD = 22;
+const PAD = 38;                         // extra ocean space for ports
 const TILE_W = R * SQRT3;
 const BOARD_W = Math.round(5 * TILE_W + PAD * 2);
-const BOARD_H = Math.round(8 * R + PAD * 2);   // 4 gaps of 1.5R + 2R top/bottom
+const BOARD_H = Math.round(8 * R + PAD * 2);
 
 // ── Hardcoded board data (matches backend graph.ts) ──────────────────────────
 type TileData = { index: number; resource: string; number: number; nodes: [number,number,number,number,number,number] };
@@ -34,6 +34,29 @@ const BOARD_TILES: TileData[] = [
   { index: 18, resource: 'wood',   number:  6, nodes: [41, 46, 50, 53, 49, 45] },
 ];
 
+// 9 standard ports — coastal edge node-pairs placed clockwise around the island
+type PortType = 'ore' | 'wheat' | 'wood' | 'sheep' | 'brick' | '3:1';
+type PortData = { type: PortType; nodes: [number, number] };
+const PORTS: PortData[] = [
+  { type: '3:1',   nodes: [0,  3]  },  // top-left
+  { type: 'ore',   nodes: [1,  4]  },  // top
+  { type: '3:1',   nodes: [2,  6]  },  // top-right
+  { type: 'wheat', nodes: [6,  10] },  // right-upper
+  { type: '3:1',   nodes: [20, 26] },  // right-middle
+  { type: 'sheep', nodes: [32, 37] },  // right-lower
+  { type: 'brick', nodes: [50, 53] },  // bottom
+  { type: '3:1',   nodes: [43, 47] },  // bottom-left
+  { type: 'wood',  nodes: [21, 27] },  // left
+];
+
+const PORT_ICON: Record<PortType, string> = {
+  ore: '⛏️', wheat: '🌾', wood: '🌲', sheep: '🐑', brick: '🧱', '3:1': '🔀',
+};
+const PORT_COLOR: Record<PortType, string> = {
+  ore: '#9ca3af', wheat: '#eab308', wood: '#22c55e',
+  sheep: '#86efac', brick: '#f97316', '3:1': '#60a5fa',
+};
+
 const RESOURCE_COLORS: Record<string, string> = {
   wood:   '#2d6e1f',
   sheep:  '#6abf3e',
@@ -43,15 +66,13 @@ const RESOURCE_COLORS: Record<string, string> = {
   desert: '#c9a84c',
 };
 
-// Resource icon (emoji) for tiles
 const RESOURCE_ICON: Record<string, string> = {
   wood: '🌲', sheep: '🐑', wheat: '🌾', ore: '⛰️', brick: '🧱', desert: '🏜️',
 };
 
-// Probability dot count per number token
 const PROB_DOTS: Record<number, number> = { 2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1 };
 
-// ── Compute tile centers ──────────────────────────────────────────────────────
+// ── Tile centers ──────────────────────────────────────────────────────────────
 const TILE_CENTERS: [number, number][] = (() => {
   const cx = BOARD_W / 2;
   const centers: [number, number][] = new Array(19);
@@ -65,15 +86,14 @@ const TILE_CENTERS: [number, number][] = (() => {
   return centers;
 })();
 
-// ── Compute node positions from tile vertices ─────────────────────────────────
-// Node order in each tile: [top, top-right, bottom-right, bottom, bottom-left, top-left]
+// ── Node positions ────────────────────────────────────────────────────────────
 const VERTEX_OFFSETS: [number, number][] = [
-  [0,              -R      ],  // top
-  [TILE_W / 2,    -R / 2  ],  // top-right
-  [TILE_W / 2,     R / 2  ],  // bottom-right
-  [0,               R      ],  // bottom
-  [-TILE_W / 2,    R / 2  ],  // bottom-left
-  [-TILE_W / 2,   -R / 2  ],  // top-left
+  [0,              -R      ],
+  [TILE_W / 2,    -R / 2  ],
+  [TILE_W / 2,     R / 2  ],
+  [0,               R      ],
+  [-TILE_W / 2,    R / 2  ],
+  [-TILE_W / 2,   -R / 2  ],
 ];
 
 const NODE_POS: [number, number][] = (() => {
@@ -82,15 +102,13 @@ const NODE_POS: [number, number][] = (() => {
     const [tcx, tcy] = TILE_CENTERS[t.index];
     for (let v = 0; v < 6; v++) {
       const n = t.nodes[v];
-      if (!pos[n]) {
-        pos[n] = [tcx + VERTEX_OFFSETS[v][0], tcy + VERTEX_OFFSETS[v][1]];
-      }
+      if (!pos[n]) pos[n] = [tcx + VERTEX_OFFSETS[v][0], tcy + VERTEX_OFFSETS[v][1]];
     }
   }
   return pos as [number, number][];
 })();
 
-// ── SVG helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function hexPoints(cx: number, cy: number, r: number): string {
   return Array.from({ length: 6 }, (_, i) => {
     const a = Math.PI / 2 - i * Math.PI / 3;
@@ -102,12 +120,93 @@ function parseEdge(edge: string): [number, number] {
   return [parseInt(edge.slice(0, 2), 10), parseInt(edge.slice(2, 4), 10)];
 }
 
-// ── House shape (settlement) at node position ─────────────────────────────────
+function useImageExists(src: string): boolean {
+  const [exists, setExists] = useState(false);
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setExists(true);
+    img.onerror = () => setExists(false);
+    img.src = src;
+  }, [src]);
+  return exists;
+}
+
+// ── HexTile ───────────────────────────────────────────────────────────────────
+function HexTile({ tile, isRobber }: { tile: TileData; isRobber: boolean }) {
+  const [cx, cy] = TILE_CENTERS[tile.index];
+  const imgSrc = `/img/${tile.resource}.jpg`;
+  const imgExists = useImageExists(imgSrc);
+  const color = RESOURCE_COLORS[tile.resource] ?? '#888';
+  const dots = PROB_DOTS[tile.number] ?? 0;
+  const isHot = tile.number === 6 || tile.number === 8;
+
+  return (
+    <g>
+      <polygon
+        points={hexPoints(cx, cy, R - 1)}
+        fill={color}
+        stroke={isRobber ? '#dc2626' : '#0a1218'}
+        strokeWidth={isRobber ? 3 : 2}
+      />
+      {imgExists && (
+        <clipPath id={`hex-clip-${tile.index}`}>
+          <polygon points={hexPoints(cx, cy, R - 2)} />
+        </clipPath>
+      )}
+      {imgExists && (
+        <image
+          href={imgSrc}
+          x={cx - R + 1} y={cy - R + 1}
+          width={(R - 1) * 2} height={(R - 1) * 2}
+          preserveAspectRatio="xMidYMid slice"
+          clipPath={`url(#hex-clip-${tile.index})`}
+          opacity={isRobber ? 0.45 : 0.85}
+        />
+      )}
+      {!imgExists && tile.resource !== 'desert' && (
+        <text x={cx} y={cy - 10} textAnchor="middle" fontSize={16}
+          style={{ userSelect: 'none' }} opacity={isRobber ? 0.4 : 1}>
+          {RESOURCE_ICON[tile.resource]}
+        </text>
+      )}
+      {!imgExists && tile.resource === 'desert' && (
+        <text x={cx} y={cy + 5} textAnchor="middle" fontSize={18}
+          style={{ userSelect: 'none' }} opacity={isRobber ? 0.4 : 1}>
+          🏜️
+        </text>
+      )}
+      {/* Number token — black bg, white text */}
+      {tile.number > 0 && !isRobber && (
+        <g>
+          <circle cx={cx} cy={cy + 10} r={14} fill="#000" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
+          <text x={cx} y={cy + 10} textAnchor="middle" dominantBaseline="central"
+            fontSize={11} fontWeight={700} fill={isHot ? '#ef4444' : '#ffffff'}>
+            {tile.number}
+          </text>
+          <text x={cx} y={cy + 23} textAnchor="middle" fontSize={6}
+            fill={isHot ? '#ef4444' : 'rgba(255,255,255,0.5)'} letterSpacing={1}>
+            {'•'.repeat(dots)}
+          </text>
+        </g>
+      )}
+      {/* Robber overlay */}
+      {isRobber && (
+        <g>
+          <circle cx={cx} cy={cy} r={20} fill="rgba(0,0,0,0.65)" />
+          <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+            fontSize={22} style={{ userSelect: 'none' }}>
+            🥷
+          </text>
+        </g>
+      )}
+    </g>
+  );
+}
+
+// ── HouseIcon ─────────────────────────────────────────────────────────────────
 function HouseIcon({ nx, ny, color, city }: { nx: number; ny: number; color: string; city?: boolean }) {
-  // Try image first; fall back to SVG shape
   const size = city ? 13 : 9;
   if (city) {
-    // City: larger square with a notch on top
     return (
       <g>
         <rect x={nx - size} y={ny - size} width={size * 2} height={size * 2}
@@ -117,7 +216,6 @@ function HouseIcon({ nx, ny, color, city }: { nx: number; ny: number; color: str
       </g>
     );
   }
-  // Settlement: house shape (rect body + triangle roof)
   const hw = size;
   const hh = size;
   return (
@@ -132,138 +230,109 @@ function HouseIcon({ nx, ny, color, city }: { nx: number; ny: number; color: str
   );
 }
 
-// ── Road segment ──────────────────────────────────────────────────────────────
+// ── Road ──────────────────────────────────────────────────────────────────────
 function Road({ edge, color }: { edge: string; color: string }) {
   const [a, b] = parseEdge(edge);
   const [ax, ay] = NODE_POS[a];
   const [bx, by] = NODE_POS[b];
-  // Midpoint thickened line with rounded caps
-  return (
-    <line x1={ax} y1={ay} x2={bx} y2={by}
-      stroke={color} strokeWidth={5} strokeLinecap="round" opacity={0.9} />
-  );
+  return <line x1={ax} y1={ay} x2={bx} y2={by}
+    stroke={color} strokeWidth={5} strokeLinecap="round" opacity={0.9} />;
 }
 
-// ── Image existence check hook ────────────────────────────────────────────────
-function useImageExists(src: string): boolean {
-  const [exists, setExists] = useState(false);
-  useEffect(() => {
-    const img = new window.Image();
-    img.onload = () => setExists(true);
-    img.onerror = () => setExists(false);
-    img.src = src;
-  }, [src]);
-  return exists;
-}
-
-// ── Tile component (image or color fallback) ──────────────────────────────────
-function HexTile({ tile }: { tile: TileData }) {
-  const [cx, cy] = TILE_CENTERS[tile.index];
-  const imgSrc = `/img/${tile.resource}.jpg`;
-  const imgExists = useImageExists(imgSrc);
-  const color = RESOURCE_COLORS[tile.resource] ?? '#888';
-  const dots = PROB_DOTS[tile.number] ?? 0;
-  const isHot = tile.number === 6 || tile.number === 8;
+// ── Port ──────────────────────────────────────────────────────────────────────
+function Port({ port }: { port: PortData }) {
+  const [x1, y1] = NODE_POS[port.nodes[0]];
+  const [x2, y2] = NODE_POS[port.nodes[1]];
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  // Push outward from board center
+  const bx = BOARD_W / 2;
+  const by = BOARD_H / 2;
+  const dx = mx - bx;
+  const dy = my - by;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const px = mx + (dx / len) * 20;
+  const py = my + (dy / len) * 20;
+  const col = PORT_COLOR[port.type];
 
   return (
     <g>
-      {/* Hex body */}
-      <polygon
-        points={hexPoints(cx, cy, R - 1)}
-        fill={color}
-        stroke="#0a1218"
-        strokeWidth={2}
-      />
-      {imgExists && (
-        <clipPath id={`hex-clip-${tile.index}`}>
-          <polygon points={hexPoints(cx, cy, R - 2)} />
-        </clipPath>
-      )}
-      {imgExists && (
-        <image
-          href={imgSrc}
-          x={cx - R + 1} y={cy - R + 1}
-          width={(R - 1) * 2} height={(R - 1) * 2}
-          preserveAspectRatio="xMidYMid slice"
-          clipPath={`url(#hex-clip-${tile.index})`}
-          opacity={0.85}
-        />
-      )}
-      {/* Resource icon when no image */}
-      {!imgExists && tile.resource !== 'desert' && (
-        <text x={cx} y={cy - 10} textAnchor="middle" fontSize={16} style={{ userSelect: 'none' }}>
-          {RESOURCE_ICON[tile.resource]}
-        </text>
-      )}
-      {!imgExists && tile.resource === 'desert' && (
-        <text x={cx} y={cy + 5} textAnchor="middle" fontSize={18} style={{ userSelect: 'none' }}>
-          🏜️
-        </text>
-      )}
-      {/* Number token */}
-      {tile.number > 0 && (
-        <g>
-          <circle cx={cx} cy={cy + 10} r={13} fill="rgba(245,240,228,0.92)" />
-          <text x={cx} y={cy + 10} textAnchor="middle" dominantBaseline="central"
-            fontSize={11} fontWeight={700}
-            fill={isHot ? '#c0392b' : '#1a1a2e'}
-          >
-            {tile.number}
-          </text>
-          <text x={cx} y={cy + 21} textAnchor="middle" fontSize={6}
-            fill={isHot ? '#c0392b' : '#6b7280'} letterSpacing={1}
-          >
-            {'•'.repeat(dots)}
-          </text>
-        </g>
-      )}
+      {/* Dashed lines to the two coast nodes */}
+      <line x1={px} y1={py} x2={x1} y2={y1}
+        stroke={col} strokeWidth={1.2} strokeDasharray="3,2" opacity={0.6} />
+      <line x1={px} y1={py} x2={x2} y2={y2}
+        stroke={col} strokeWidth={1.2} strokeDasharray="3,2" opacity={0.6} />
+      {/* Port circle */}
+      <circle cx={px} cy={py} r={13} fill="#050e1c" stroke={col} strokeWidth={1.5} />
+      <text x={px} y={py - 2} textAnchor="middle" dominantBaseline="middle"
+        fontSize={9} style={{ userSelect: 'none' }}>
+        {PORT_ICON[port.type]}
+      </text>
+      <text x={px} y={py + 8} textAnchor="middle"
+        fontSize={6} fontWeight={700} fill={col} letterSpacing={0.5}>
+        {port.type === '3:1' ? '3:1' : '2:1'}
+      </text>
     </g>
   );
 }
 
-// ── Main board component ──────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 interface Props {
   standings: Standing[];
+  robberTile?: number;
 }
 
-export default function CatanBoard({ standings }: Props) {
+export default function CatanBoard({ standings, robberTile = 9 }: Props) {
   return (
-    <svg
-      width={BOARD_W}
-      height={BOARD_H}
-      style={{ display: 'block', background: '#0a1828', borderRadius: 12 }}
-    >
-      {/* Ocean background */}
-      <rect width={BOARD_W} height={BOARD_H} fill="#0a1828" rx={12} />
+    <div style={{
+      display: 'inline-block',
+      border: '2px solid #1e3a5f',
+      borderRadius: 14,
+      boxShadow: '0 0 0 1px rgba(255,255,255,0.04), 0 4px 24px rgba(0,0,0,0.5)',
+      overflow: 'hidden',
+    }}>
+      <svg
+        width={BOARD_W}
+        height={BOARD_H}
+        style={{ display: 'block', background: '#071525' }}
+      >
+        {/* Ocean background */}
+        <rect width={BOARD_W} height={BOARD_H} fill="#071525" />
 
-      {/* Tiles */}
-      {BOARD_TILES.map(tile => <HexTile key={tile.index} tile={tile} />)}
+        {/* Ports (drawn behind tiles) */}
+        {PORTS.map((p, i) => <Port key={i} port={p} />)}
 
-      {/* Roads (draw before settlements so settlements appear on top) */}
-      {standings.map((s, si) => {
-        const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
-        return (s.roadEdges ?? []).map(edge => (
-          <Road key={`${si}-${edge}`} edge={edge} color={color} />
-        ));
-      })}
+        {/* Tiles */}
+        {BOARD_TILES.map(tile => (
+          <HexTile key={tile.index} tile={tile} isRobber={tile.index === robberTile} />
+        ))}
 
-      {/* Settlements */}
-      {standings.map((s, si) => {
-        const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
-        return (s.settlementNodes ?? []).map(n => {
-          const [nx, ny] = NODE_POS[n];
-          return <HouseIcon key={`settlement-${si}-${n}`} nx={nx} ny={ny} color={color} />;
-        });
-      })}
+        {/* Roads */}
+        {standings.map((s, si) => {
+          const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
+          return (s.roadEdges ?? []).map(edge => (
+            <Road key={`${si}-${edge}`} edge={edge} color={color} />
+          ));
+        })}
 
-      {/* Cities */}
-      {standings.map((s, si) => {
-        const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
-        return (s.cityNodes ?? []).map(n => {
-          const [nx, ny] = NODE_POS[n];
-          return <HouseIcon key={`city-${si}-${n}`} nx={nx} ny={ny} color={color} city />;
-        });
-      })}
-    </svg>
+        {/* Settlements */}
+        {standings.map((s, si) => {
+          const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
+          return (s.settlementNodes ?? []).map(n => {
+            const [nx, ny] = NODE_POS[n];
+            return <HouseIcon key={`s-${si}-${n}`} nx={nx} ny={ny} color={color} />;
+          });
+        })}
+
+        {/* Cities */}
+        {standings.map((s, si) => {
+          const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
+          return (s.cityNodes ?? []).map(n => {
+            const [nx, ny] = NODE_POS[n];
+            return <HouseIcon key={`c-${si}-${n}`} nx={nx} ny={ny} color={color} city />;
+          });
+        })}
+      </svg>
+    </div>
   );
 }

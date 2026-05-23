@@ -221,7 +221,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
         gridTemplateColumns: 'auto 1fr',
         gap: 16, marginBottom: 14, alignItems: 'start',
       }}>
-        <CatanBoard standings={match.standings} />
+        <CatanBoard standings={match.standings} robberTile={match.robberTile ?? 9} />
 
         {/* Right column: player resources + summary */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

@@ -880,6 +880,7 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Match not found' });
     }
 
+    const matchRaw3 = match as unknown as { robberTile?: number };
     res.json({
       id: match.id,
       gameType: match.gameType,
@@ -890,6 +891,7 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       summary: match.summary,
       winner: match.winner?.name ?? null,
       shareToken: match.shareToken,
+      robberTile: matchRaw3.robberTile ?? 9,
       standings: (() => {
         const matchRaw2 = match as unknown as { largestArmyHolder?: number | null };
         const largestArmyHolder = matchRaw2.largestArmyHolder ?? null;
