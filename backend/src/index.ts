@@ -786,6 +786,26 @@ app.post('/api/matches/:id/resume', authenticate, async (req: Request, res: Resp
   }
 });
 
+app.get('/api/health', async (_req: Request, res: Response) => {
+  let dbOk = false;
+  let dbError: string | null = null;
+  try {
+    await pool.query('SELECT 1');
+    dbOk = true;
+  } catch (e) {
+    dbError = e instanceof Error ? e.message : String(e);
+  }
+  const maskedUrl = connectionString
+    ? connectionString.replace(/:\/\/[^:]+:[^@]+@/, '://***:***@')
+    : null;
+  res.status(dbOk ? 200 : 503).json({
+    backend: true,
+    database: dbOk,
+    databaseUrl: maskedUrl,
+    ...(dbError ? { databaseError: dbError } : {}),
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   seedAgentsIfNeeded().catch((error) => {

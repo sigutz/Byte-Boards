@@ -15,6 +15,7 @@ import Share from './pages/Share';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Landing from './pages/Landing';
+import HealthCheck from './pages/HealthCheck';
 
 type Invitations = Record<string, string>; // matchId → invitedBy name
 
@@ -333,6 +334,7 @@ function AppInner() {
   const parts             = url.pathname.split('/').filter(Boolean);
   const shareToken        = url.searchParams.get('share');
   const invitedByRaw      = url.searchParams.get('from') ?? '';
+  const isHealthCheckPage = url.pathname === '/health-check';
   const isLoginPage       = url.pathname === '/login';
   const isRegisterPage    = url.pathname === '/register';
   const isMatchDetailPage = url.pathname.startsWith('/matches/');
@@ -353,6 +355,7 @@ function AppInner() {
     }
   }, [route, user]);
 
+  if (isHealthCheckPage) return <HealthCheck navigate={navigate} />;
   if (isLoginPage)    return <Login navigate={navigate} />;
   if (isRegisterPage) return <Register navigate={navigate} />;
 
