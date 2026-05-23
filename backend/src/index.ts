@@ -309,7 +309,7 @@ function updateLongestRoad(stateMap: Map<number, PlayerState>): void {
 
   if (currentHolderId === null) {
     let bestId: number | null = null;
-    let bestLen = 4;
+    let bestLen = 5;
     for (const [id, s] of stateMap) {
       const len = roadLen(id, s);
       if (len > bestLen) { bestLen = len; bestId = id; }
@@ -487,9 +487,13 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         payload: { dice: [d1, d2] },
       });
 
+      let robberMoved = false;
       for (const entry of match.agents) {
         const s = stateMap.get(entry.agentId)!;
         const opponents = [...stateMap.values()].filter(p => p.agentId !== entry.agentId);
+
+        // Only the first agent per turn moves the robber on a 7 roll
+        const currentRobberPayload = robberMoved ? undefined : robberPayload;
 
         // Build knight payload when agent has knight cards (before calling AI)
         let knightPayload: KnightPayload | undefined;
@@ -517,7 +521,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           : ((entry.agent.traits ?? []) as Trait[]);
         const { action, commentary } = await getAgentDecision(
           entry.agent.name, s, opponents, total, turn, occupancy,
-          robberPayload, knightPayload,
+          currentRobberPayload, knightPayload,
           agentTraits.length > 0 ? agentTraits : undefined,
         );
 
@@ -599,6 +603,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
             }
           }
           actionText = `moves the robber to tile ${newTile}`;
+          robberMoved = true;
         } else {
           const result = applyAction(s, action);
           actionText = result.text;
