@@ -159,6 +159,13 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
     } catch { setError('Could not delete match.'); }
   }
 
+  async function deleteAgent(id: number) {
+    try {
+      await apiFetch(`/api/agents/${id}`, { method: 'DELETE' });
+      await loadBase();
+    } catch { setError('Could not delete agent.'); }
+  }
+
   async function startMatch() {
     setIsCreatingMatch(true);
     setError('');
@@ -276,6 +283,7 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
           linkCopied={linkCopied}
           invitedBy={invitedBy || undefined}
           currentUserId={user.id}
+          isAdmin={isAdmin}
           onStopMatch={stopMatch}
           onDeleteMatch={(id) => { deleteMatch(id); navigate('/history'); }}
         />
@@ -292,6 +300,7 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
           onStopMatch={stopMatch}
           invitations={invitations}
           currentUserName={user.name ?? user.email}
+          isAdmin={isAdmin}
         />
       )}
 
@@ -322,6 +331,8 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
           navigate={navigate}
           error={error}
           onAgentCreated={() => void loadBase()}
+          isAdmin={isAdmin}
+          onDeleteAgent={isAdmin ? deleteAgent : undefined}
         />
       )}
     </>

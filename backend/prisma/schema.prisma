@@ -19,6 +19,7 @@ model User {
   role           Role     @default(USER)
   createdAt      DateTime @default(now())
   createdMatches Match[]  @relation("MatchCreator")
+  createdAgents  Agent[]  @relation("AgentCreator")
 }
 
 model Agent {
@@ -28,6 +29,8 @@ model Agent {
   traits      Json         @default("[]")  // deprecated — use AgentTrait relation
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
+  createdById Int?
+  createdBy   User?        @relation("AgentCreator", fields: [createdById], references: [id], onDelete: SetNull)
   wonMatches  Match[]      @relation("MatchWinner")
   matches     MatchAgent[]
   events      MatchEvent[] @relation("EventActor")

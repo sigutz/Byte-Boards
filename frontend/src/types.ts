@@ -20,6 +20,7 @@ export type Standing = {
   score: number;
   position: number | null;
   seat?: number;
+  createdBy?: string | null;
   resources?: number;
   wood?: number;
   brick?: number;
@@ -136,7 +137,11 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     ...options,
     headers: { ...headers, ...(options?.headers as Record<string, string> | undefined) },
   });
-  if (!res.ok) throw new Error(`API error: ${path}`);
+  if (!res.ok) {
+    let msg = `API error: ${path}`;
+    try { const b = await res.json() as { error?: string }; if (b.error) msg = b.error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
   if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T;
   return res.json() as Promise<T>;
 }

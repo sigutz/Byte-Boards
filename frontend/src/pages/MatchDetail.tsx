@@ -10,6 +10,7 @@ interface Props {
   linkCopied?: boolean;
   invitedBy?: string;
   currentUserId?: number;
+  isAdmin?: boolean;
   onStopMatch?: (id: string) => void;
   onDeleteMatch?: (id: string) => void;
 }
@@ -41,7 +42,12 @@ function PlayerResources({ standings, winner, events }: { standings: Standing[];
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               {isWinner && <span style={{ fontSize: 14 }}>🏆</span>}
               <div style={{ width: 9, height: 9, borderRadius: '50%', background: color.hex, flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', flex: 1 }}>{s.name}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{s.name}</div>
+                {s.createdBy && (
+                  <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>by {s.createdBy}</div>
+                )}
+              </div>
               <span style={{
                 fontSize: 12, fontWeight: 700, color: color.hex,
                 background: color.bg, padding: '1px 7px', borderRadius: 4,
@@ -307,7 +313,7 @@ function splitSummary(summary: string | null) {
   };
 }
 
-export default function MatchDetailPage({ match, navigate, copyShareLink, linkCopied, invitedBy, currentUserId, onStopMatch, onDeleteMatch }: Props) {
+export default function MatchDetailPage({ match, navigate, copyShareLink, linkCopied, invitedBy, currentUserId, isAdmin, onStopMatch, onDeleteMatch }: Props) {
   if (!match) {
     return (
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px', textAlign: 'center', color: '#334155' }}>
@@ -393,7 +399,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
           }}>
             {linkCopied ? 'Copied!' : 'Copy share link'}
           </button>
-          {currentUserId != null && match.createdById === currentUserId && isLive && onStopMatch && (
+          {(isAdmin || (currentUserId != null && match.createdById === currentUserId)) && isLive && onStopMatch && (
             <button
               onClick={() => { if (confirm('Stop this match?')) onStopMatch(match.id); }}
               style={{
@@ -405,7 +411,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
               Stop
             </button>
           )}
-          {currentUserId != null && match.createdById === currentUserId && onDeleteMatch && (
+          {(isAdmin || (currentUserId != null && match.createdById === currentUserId)) && onDeleteMatch && (
             <button
               onClick={() => { if (confirm('Delete this match permanently?')) { onDeleteMatch(match.id); navigate('/history'); } }}
               style={{
