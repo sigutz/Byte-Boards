@@ -90,28 +90,9 @@ function randomInt(min: number, max: number): number {
 }
 
 
-async function migrateAgentTraitsIfNeeded(): Promise<void> {
-  const agentTraitCount = await prisma.agentTrait.count();
-  if (agentTraitCount > 0) return;
-
-  const agents = await prisma.agent.findMany();
-  const traitRows = await prisma.trait.findMany({ select: { id: true, name: true } });
-  if (traitRows.length === 0) return;
-  const idOf = Object.fromEntries(traitRows.map(r => [r.name, r.id]));
-
-  for (const agent of agents) {
-    const traitsJson = (agent.traits as string[]) ?? [];
-    const records = traitsJson.map(t => idOf[t]).filter(Boolean).map(traitId => ({ agentId: agent.id, traitId }));
-    if (records.length > 0) {
-      await prisma.agentTrait.createMany({ data: records, skipDuplicates: true });
-    }
-  }
-}
-
 async function seedAgentsIfNeeded(): Promise<void> {
   const existing = await prisma.agent.count();
   if (existing > 0) {
-    await migrateAgentTraitsIfNeeded();
     for (const agentDef of DEFAULT_AGENTS) {
       await prisma.agent.updateMany({
         where: { name: agentDef.name, description: null },
@@ -126,7 +107,7 @@ async function seedAgentsIfNeeded(): Promise<void> {
 
   for (const agentDef of DEFAULT_AGENTS) {
     const agent = await prisma.agent.create({
-      data: { name: agentDef.name, description: agentDef.description, traits: agentDef.traits as unknown as Prisma.InputJsonValue },
+      data: { name: agentDef.name, description: agentDef.description },
     });
     const records = agentDef.traits.map(t => idOf[t]).filter(Boolean).map(traitId => ({ agentId: agent.id, traitId }));
     if (records.length > 0) {
@@ -529,9 +510,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           knightPayload = { eligibleTiles: eligibleForKnight, targets: knightTargets };
         }
 
-        const agentTraits: Trait[] = entry.agent.agentTraits.length > 0
-          ? entry.agent.agentTraits.map(at => at.trait.name as Trait)
-          : ((entry.agent.traits ?? []) as Trait[]);
+        const agentTraits = entry.agent.agentTraits.map(at => at.trait.name as Trait);
         const { action, commentary } = await getAgentDecision(
           entry.agent.name, s, opponents, total, turn, occupancy,
           currentRobberPayload, knightPayload,
@@ -902,9 +881,7 @@ app.get('/api/agents', authenticate, async (req: Request, res: Response) => {
         id: agent.id,
         name: agent.name,
         description: agent.description ?? null,
-        traits: agent.agentTraits.length > 0
-          ? agent.agentTraits.map(at => at.trait.name as Trait)
-          : (agent.traits as Trait[]) ?? [],
+        traits: agent.agentTraits.map(at => at.trait.name as Trait),
       }))
     );
   } catch (error) {
@@ -963,7 +940,7 @@ app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
     }
 
     const agent = await prisma.agent.create({
-      data: { name, description, traits: traits as unknown as Prisma.InputJsonValue, createdById: req.user!.id },
+      data: { name, description, createdById: req.user!.id },
     });
     if (traits.length > 0) {
       const selectedTraitRows = await prisma.trait.findMany({
