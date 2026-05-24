@@ -112,6 +112,12 @@ async function seedAgentsIfNeeded(): Promise<void> {
   const existing = await prisma.agent.count();
   if (existing > 0) {
     await migrateAgentTraitsIfNeeded();
+    for (const agentDef of DEFAULT_AGENTS) {
+      await prisma.agent.updateMany({
+        where: { name: agentDef.name, description: null },
+        data: { description: agentDef.description },
+      });
+    }
     return;
   }
 
@@ -164,7 +170,14 @@ async function getMatchWithDetails(matchId: string) {
     include: {
       winner: true,
       agents: {
-        include: { agent: { include: { agentTraits: { include: { trait: true } } } } },
+        include: {
+          agent: {
+            include: {
+              agentTraits: { include: { trait: true } },
+              createdBy: { select: { name: true, email: true } },
+            },
+          },
+        },
         orderBy: { seat: 'asc' },
       },
       events: {
@@ -869,11 +882,19 @@ app.get('/api/traits', async (_req: Request, res: Response) => {
   }
 });
 
-app.get('/api/agents', async (req: Request, res: Response) => {
+app.get('/api/agents', authenticate, async (req: Request, res: Response) => {
   try {
     await seedAgentsIfNeeded();
+    const isAdmin = req.user!.role === Role.ADMIN;
+
     const agents = await prisma.agent.findMany({
       orderBy: { id: 'asc' },
+      where: isAdmin ? undefined : {
+        OR: [
+          { createdById: null },
+          { createdById: req.user!.id },
+        ],
+      },
       include: { agentTraits: { include: { trait: true } } },
     });
     res.json(
@@ -911,8 +932,9 @@ app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid traits' }); return;
     }
 
+    const idOf = Object.fromEntries(dbTraits.map(t => [t.name, t.id]));
+
     if (dbTraits.length > 0) {
-      const idOf = Object.fromEntries(dbTraits.map(t => [t.name, t.id]));
       const selectedIds = new Set(traits.map(t => idOf[t]).filter(Boolean));
       for (const trait of dbTraits) {
         if (!selectedIds.has(trait.id)) continue;
@@ -926,8 +948,22 @@ app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Conflicting traits selected' }); return;
     }
 
+    // Reject duplicate trait sets per user
+    const userAgents = await prisma.agent.findMany({
+      where: { createdById: req.user!.id },
+      include: { agentTraits: { select: { traitId: true } } },
+    });
+    const selectedTraitIds = new Set(traits.map(t => idOf[t]).filter(Boolean) as number[]);
+    const hasDuplicate = userAgents.some(a => {
+      const existing = new Set(a.agentTraits.map(at => at.traitId));
+      return existing.size === selectedTraitIds.size && [...selectedTraitIds].every(id => existing.has(id));
+    });
+    if (hasDuplicate) {
+      res.status(409).json({ error: 'You already have a bot with these traits' }); return;
+    }
+
     const agent = await prisma.agent.create({
-      data: { name, description, traits: traits as unknown as Prisma.InputJsonValue },
+      data: { name, description, traits: traits as unknown as Prisma.InputJsonValue, createdById: req.user!.id },
     });
     if (traits.length > 0) {
       const selectedTraitRows = await prisma.trait.findMany({
@@ -969,7 +1005,15 @@ app.get('/api/agents/metrics', authenticate, async (req: Request, res: Response)
           },
         };
 
+    const agentFilter = isAdmin ? undefined : {
+      OR: [
+        { createdById: null },
+        { createdById: req.user!.id },
+      ],
+    };
+
     const agents = await prisma.agent.findMany({
+      where: agentFilter,
       include: {
         matches: {
           where: matchFilter,
@@ -1156,6 +1200,9 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
             knightsPlayed:   entryRaw.knightsPlayed ?? 0,
             hasLargestArmy:  entry.agentId === largestArmyHolder,
             hasLongestRoad:  entry.agentId === longestRoadHolder,
+            createdBy: entry.agent.createdBy
+              ? (entry.agent.createdBy.name ?? entry.agent.createdBy.email)
+              : null,
           };
         });
       })(),

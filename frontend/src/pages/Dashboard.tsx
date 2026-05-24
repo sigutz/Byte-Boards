@@ -20,6 +20,8 @@ interface Props {
   navigate: (path: string) => void;
   error: string;
   onAgentCreated: () => void;
+  isAdmin?: boolean;
+  onDeleteAgent?: (id: number) => void;
 }
 
 const TRAIT_COLORS: Record<Trait, { hex: string; bg: string }> = {
@@ -34,7 +36,7 @@ const TRAIT_COLORS: Record<Trait, { hex: string; bg: string }> = {
   Defensive:    { hex: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
 };
 
-function BotCreator({ onCreated }: { onCreated: () => void }) {
+function BotCreator({ onCreated, agents }: { onCreated: () => void; agents: Agent[] }) {
   const [open, setOpen] = useLocalState(false);
   const [name, setName] = useLocalState('');
   const [description, setDescription] = useLocalState('');
@@ -66,9 +68,18 @@ function BotCreator({ onCreated }: { onCreated: () => void }) {
     return selectedTraits.some(s => info.conflicts.includes(s) || traitInfos.find(i => i.name === s)?.conflicts.includes(t));
   }
 
+  function isDuplicateTraitSet(traits: Trait[]): boolean {
+    if (traits.length === 0) return false;
+    const sorted = [...traits].sort().join(',');
+    return agents.some(a => [...a.traits].sort().join(',') === sorted);
+  }
+
+  const duplicateWarning = isDuplicateTraitSet(selectedTraits);
+
   async function save() {
     setErr('');
     if (!name.trim()) { setErr('Enter a name'); return; }
+    if (duplicateWarning) { setErr('You already have a bot with these traits'); return; }
     setSaving(true);
     try {
       await apiFetch('/api/agents', {
@@ -168,18 +179,23 @@ function BotCreator({ onCreated }: { onCreated: () => void }) {
             })}
           </div>
 
+          {duplicateWarning && (
+            <div style={{ fontSize: 11, color: '#f59e0b' }}>
+              You already have a bot with these traits
+            </div>
+          )}
           {err && <div style={{ fontSize: 11, color: '#f87171' }}>{err}</div>}
 
           <button
             onClick={() => void save()}
-            disabled={saving || !name.trim()}
+            disabled={saving || !name.trim() || duplicateWarning}
             style={{
               padding: '8px', borderRadius: 6, fontSize: 13, fontWeight: 600,
-              border: 'none', cursor: saving || !name.trim() ? 'not-allowed' : 'pointer',
-              background: saving || !name.trim()
+              border: 'none', cursor: saving || !name.trim() || duplicateWarning ? 'not-allowed' : 'pointer',
+              background: saving || !name.trim() || duplicateWarning
                 ? 'rgba(217,119,6,0.08)'
                 : 'linear-gradient(135deg, #d97706, #b45309)',
-              color: saving || !name.trim() ? '#7c4a00' : 'white',
+              color: saving || !name.trim() || duplicateWarning ? '#7c4a00' : 'white',
             }}
           >
             {saving ? 'Creating…' : 'Create Bot'}
@@ -255,7 +271,7 @@ export default function Dashboard({
   agents, metrics, selectedAgentIds, toggleAgent,
   isCreatingMatch, hasLiveMatch, startMatch, onPauseResume,
   selectedMatch, copyShareLink, linkCopied, navigate, error,
-  onAgentCreated,
+  onAgentCreated, isAdmin, onDeleteAgent,
 }: Props) {
   const selectedCount = selectedAgentIds.length;
 
@@ -343,7 +359,7 @@ export default function Dashboard({
                 const color = PLAYER_COLORS[selected ? colorIdx : agentIdx % PLAYER_COLORS.length];
                 const metric = getMetric(agent.id);
                 return (
-                  <button key={agent.id} onClick={() => !maxed && toggleAgent(agent.id)} style={{
+                  <div key={agent.id} onClick={() => !maxed && toggleAgent(agent.id)} style={{
                     padding: '9px 10px', borderRadius: 8, textAlign: 'left',
                     border: selected ? `1px solid ${color.hex}55` : '1px solid #1a2e47',
                     background: selected ? color.bg : 'transparent',
@@ -401,13 +417,28 @@ export default function Dashboard({
                           P{colorIdx + 1}
                         </span>
                       )}
+                      {isAdmin && onDeleteAgent && (
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            if (confirm(`Delete agent "${agent.name}"?`)) onDeleteAgent(agent.id);
+                          }}
+                          style={{
+                            flexShrink: 0, background: 'none', border: '1px solid #3a1c1c',
+                            color: '#7f1d1d', borderRadius: 4, padding: '2px 6px',
+                            fontSize: 10, cursor: 'pointer', lineHeight: 1,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
 
-            <BotCreator onCreated={onAgentCreated} />
+            <BotCreator onCreated={onAgentCreated} agents={agents} />
 
             <button
               onClick={() => void startMatch()}

@@ -10,6 +10,7 @@ interface Props {
   onStopMatch?: (id: string) => void;
   invitations: Record<string, string>; // matchId → invitedBy
   currentUserName: string;
+  isAdmin?: boolean;
 }
 
 function formatDate(iso: string) {
@@ -19,7 +20,7 @@ function formatDate(iso: string) {
   });
 }
 
-export default function History({ matches, navigate, gameTypes, selectedType, onTypeChange, onDeleteMatch, onStopMatch, invitations, currentUserName }: Props) {
+export default function History({ matches, navigate, gameTypes, selectedType, onTypeChange, onDeleteMatch, onStopMatch, invitations, currentUserName, isAdmin }: Props) {
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>
       {/* Filter bar */}
@@ -171,7 +172,7 @@ export default function History({ matches, navigate, gameTypes, selectedType, on
                 <div style={{ fontSize: 11, color: '#334155' }}>
                   {formatDate(match.createdAt)}
                 </div>
-                {startedByYou && (
+                {(isAdmin || startedByYou) && (
                   <div style={{ display: 'flex', gap: 5 }}>
                     {onStopMatch && (isLive || isPaused) && (
                       <button
