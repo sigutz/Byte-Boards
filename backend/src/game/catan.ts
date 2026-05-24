@@ -33,10 +33,12 @@ export type PlayerState = {
   settlementNodes: number[];
   cityNodes: number[];
   roadEdges: string[];
+  shipEdges: string[];
   devCards: DevCardCounts;
   knightsPlayed: number;
   hasLargestArmy: boolean;
   hasLongestRoad: boolean;
+  islandVPs: number;
 };
 
 export type BoardOccupancy = {
@@ -77,7 +79,8 @@ export function computeVP(player: PlayerState): number {
     player.cityNodes.length * 2 +
     player.devCards.vp +
     (player.hasLargestArmy ? 2 : 0) +
-    (player.hasLongestRoad ? 2 : 0)
+    (player.hasLongestRoad ? 2 : 0) +
+    player.islandVPs
   );
 }
 
@@ -166,7 +169,7 @@ export function getValidActions(
     const candidateNodes = new Set([...playerNodes, ...playerRoadNodes]);
     const checkedEdges = new Set<string>();
     for (const nodeId of candidateNodes) {
-      for (const adjNode of BOARD_NODES[nodeId].adjacentNodes) {
+      for (const adjNode of (BOARD_NODES[nodeId]?.adjacentNodes ?? [])) {
         const edge = edgeId(nodeId, adjNode);
         if (checkedEdges.has(edge)) continue;
         checkedEdges.add(edge);
@@ -284,7 +287,7 @@ export function handleRobber(players: PlayerState[]): string {
 export function createInitialPlacement(
   takenNodes: number[],
   takenEdges: string[],
-): { settlementNodes: number[]; cityNodes: number[]; roadEdges: string[] } {
+): { settlementNodes: number[]; cityNodes: number[]; roadEdges: string[]; shipEdges: string[] } {
   // Shuffle all node IDs
   const allNodes = Array.from({ length: 54 }, (_, i) => i)
     .sort(() => Math.random() - 0.5);
@@ -313,8 +316,9 @@ export function createInitialPlacement(
     }
   }
 
-  return { settlementNodes, cityNodes: [], roadEdges };
+  return { settlementNodes, cityNodes: [], roadEdges, shipEdges: [] };
 }
+
 
 export function getValidRoadEdges(player: PlayerState, occupancy: BoardOccupancy): string[] {
   const playerNodes = new Set([...player.settlementNodes, ...player.cityNodes]);
@@ -325,7 +329,7 @@ export function getValidRoadEdges(player: PlayerState, occupancy: BoardOccupancy
   const edges: string[] = [];
   const checkedEdges = new Set<string>();
   for (const nodeId of candidateNodes) {
-    for (const adjNode of BOARD_NODES[nodeId].adjacentNodes) {
+    for (const adjNode of (BOARD_NODES[nodeId]?.adjacentNodes ?? [])) {
       const edge = edgeId(nodeId, adjNode);
       if (checkedEdges.has(edge)) continue;
       checkedEdges.add(edge);

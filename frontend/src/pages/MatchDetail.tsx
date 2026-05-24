@@ -15,7 +15,7 @@ interface Props {
   onDeleteMatch?: (id: string) => void;
 }
 
-function PlayerResources({ standings, winner, events }: { standings: Standing[]; winner: string | null; events: MatchEvent[] }) {
+function PlayerResources({ standings, winner, events, isSeafarers }: { standings: Standing[]; winner: string | null; events: MatchEvent[]; isSeafarers: boolean }) {
   const [expanded, setExpanded] = useState(new Set<string>());
   const toggle = (id: string) => setExpanded(prev => {
     const next = new Set(prev);
@@ -89,10 +89,22 @@ function PlayerResources({ standings, winner, events }: { standings: Standing[];
               ))}
             </div>
             {/* Buildings row */}
-            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#475569', marginBottom: 5 }}>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#475569', marginBottom: 5, flexWrap: 'wrap' }}>
               <span>🏠 {s.settlements ?? (s.settlementNodes?.length ?? 2)}</span>
               <span>🏙️ {s.cities ?? (s.cityNodes?.length ?? 0)}</span>
               <span>🛤️ {s.roads ?? (s.roadEdges?.length ?? 0)}</span>
+              {isSeafarers && (
+                <span style={{ color: '#22d3ee' }}>⛵ {(s.shipEdges ?? []).length}</span>
+              )}
+              {isSeafarers && (s.islandVPs ?? 0) > 0 && (
+                <span style={{
+                  color: '#a78bfa', fontWeight: 700,
+                  padding: '0px 5px', borderRadius: 4,
+                  background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.25)',
+                }}>
+                  🏝️ +{s.islandVPs} island VP
+                </span>
+              )}
             </div>
             {/* Dev cards */}
             {s.devCards && (() => {
@@ -214,7 +226,7 @@ function parseTurnState(events: MatchEvent[], standings: Standing[]) {
   return { currentTurn, lastDice, lastActor, lastActionByPlayer };
 }
 
-function TurnSummary({ events, standings }: { events: MatchEvent[]; standings: Standing[] }) {
+function TurnSummary({ events, standings, pirateHex, isSeafarers }: { events: MatchEvent[]; standings: Standing[]; pirateHex: number | null; isSeafarers: boolean }) {
   const { currentTurn, lastDice, lastActor, lastActionByPlayer } = parseTurnState(events, standings);
 
   const playerColors = new Map<string, string>();
@@ -258,6 +270,20 @@ function TurnSummary({ events, standings }: { events: MatchEvent[]; standings: S
             {lastDice ?? '—'}
           </span>
         </div>
+
+        {isSeafarers && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            padding: '8px 16px', borderRadius: 8,
+            background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.25)',
+            minWidth: 60,
+          }}>
+            <span style={{ fontSize: 10, color: '#22d3ee', letterSpacing: '0.08em', marginBottom: 4 }}>PIRATE</span>
+            <span style={{ fontSize: 18, fontWeight: 700, color: '#22d3ee' }}>
+              {pirateHex !== null ? `T${pirateHex}` : '—'}
+            </span>
+          </div>
+        )}
 
         {lastActor && (
           <div style={{
@@ -323,6 +349,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
   }
 
   const isLive = match.status === 'LIVE';
+  const isSeafarers = match.gameType === 'catan-seafarers';
   const { overview, keyMoments } = splitSummary(match.summary);
 
   return (
@@ -354,14 +381,25 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
         borderRadius: 12, padding: '16px 20px', marginBottom: 14,
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
       }}>
-        <span style={{
-          padding: '3px 9px', borderRadius: 5,
-          fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
-          background: 'rgba(217,119,6,0.12)', border: '1px solid rgba(217,119,6,0.3)',
-          color: '#d97706', textTransform: 'uppercase',
-        }}>
-          {match.gameType}
-        </span>
+        {isSeafarers ? (
+          <span style={{
+            padding: '3px 9px', borderRadius: 5,
+            fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+            background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.35)',
+            color: '#22d3ee', textTransform: 'uppercase',
+          }}>
+            ⛵ Seafarers
+          </span>
+        ) : (
+          <span style={{
+            padding: '3px 9px', borderRadius: 5,
+            fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+            background: 'rgba(217,119,6,0.12)', border: '1px solid rgba(217,119,6,0.3)',
+            color: '#d97706', textTransform: 'uppercase',
+          }}>
+            {match.gameType}
+          </span>
+        )}
         {isLive ? (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -434,8 +472,8 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
       }}>
         {/* Left column: board + turn summary */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <CatanBoard standings={match.standings} robberTile={match.robberTile ?? 9} />
-          <TurnSummary events={match.events} standings={match.standings} />
+          <CatanBoard standings={match.standings} robberTile={match.robberTile ?? 9} pirateHex={match.pirateHex} isSeafarers={isSeafarers} />
+          <TurnSummary events={match.events} standings={match.standings} pirateHex={match.pirateHex ?? null} isSeafarers={isSeafarers} />
         </div>
 
         {/* Right column: player resources + summary (completed only) */}
@@ -447,7 +485,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
             }}>
               PLAYERS
             </div>
-            <PlayerResources standings={match.standings} winner={match.winner} events={match.events} />
+            <PlayerResources standings={match.standings} winner={match.winner} events={match.events} isSeafarers={isSeafarers} />
           </div>
 
           {!isLive && (

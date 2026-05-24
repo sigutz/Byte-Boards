@@ -5,12 +5,16 @@ import { PLAYER_COLORS } from '../types';
 // ── Board geometry ────────────────────────────────────────────────────────────
 const R = 44;
 const SQRT3 = Math.sqrt(3);
-const PAD = 38;                         // extra ocean space for ports
+const PAD = 38;
 const TILE_W = R * SQRT3;
 const BOARD_W = Math.round(5 * TILE_W + PAD * 2);
 const BOARD_H = Math.round(8 * R + PAD * 2);
 
-// ── Hardcoded board data (matches backend graph.ts) ──────────────────────────
+// Expanded canvas for Seafarers (outer islands sit to the right)
+const SEA_W = 668;
+const SEA_H = 468;
+
+// ── Main island data (matches backend graph.ts) ───────────────────────────────
 type TileData = { index: number; resource: string; number: number; nodes: [number,number,number,number,number,number] };
 const BOARD_TILES: TileData[] = [
   { index:  0, resource: 'wood',   number: 11, nodes: [ 0,  4,  8, 12,  7,  3] },
@@ -34,19 +38,54 @@ const BOARD_TILES: TileData[] = [
   { index: 18, resource: 'wood',   number:  6, nodes: [41, 46, 50, 53, 49, 45] },
 ];
 
-// 9 standard ports — coastal edge node-pairs placed clockwise around the island
+// ── Outer island tiles (matches backend seafarers-graph.ts) ───────────────────
+type OuterTileData = { index: number; resource: string; number: number; nodes: readonly number[] };
+const OUTER_TILES: OuterTileData[] = [
+  { index: 19, resource: 'sheep', number: 5, nodes: [54, 55, 56, 57, 58, 59] },
+  { index: 20, resource: 'wheat', number: 4, nodes: [60, 61, 62, 63, 64, 65] },
+  { index: 21, resource: 'gold',  number: 6, nodes: [66, 67, 68, 69, 70, 71] },
+];
+
+// Outer tile centers chosen to sit in the sea to the right of the main island
+const OUTER_CENTERS: Record<number, [number, number]> = {
+  19: [508, 72],
+  20: [592, 200],
+  21: [562, 360],
+};
+
+const OUTER_NODE_POS: Record<number, [number, number]> = (() => {
+  const pos: Record<number, [number, number]> = {};
+  for (const t of OUTER_TILES) {
+    const [cx, cy] = OUTER_CENTERS[t.index];
+    const ns = t.nodes as number[];
+    pos[ns[0]] = [cx, cy - R];
+    pos[ns[1]] = [cx + TILE_W / 2, cy - R / 2];
+    pos[ns[2]] = [cx + TILE_W / 2, cy + R / 2];
+    pos[ns[3]] = [cx, cy + R];
+    pos[ns[4]] = [cx - TILE_W / 2, cy + R / 2];
+    pos[ns[5]] = [cx - TILE_W / 2, cy - R / 2];
+  }
+  return pos;
+})();
+
+function anyNodePos(nodeId: number): [number, number] | null {
+  if (nodeId < 54) return NODE_POS[nodeId] ?? null;
+  return OUTER_NODE_POS[nodeId] ?? null;
+}
+
+// ── Ports ─────────────────────────────────────────────────────────────────────
 type PortType = 'ore' | 'wheat' | 'wood' | 'sheep' | 'brick' | '3:1';
 type PortData = { type: PortType; nodes: [number, number] };
 const PORTS: PortData[] = [
-  { type: '3:1',   nodes: [0,  3]  },  // top-left
-  { type: 'ore',   nodes: [1,  4]  },  // top
-  { type: '3:1',   nodes: [2,  6]  },  // top-right
-  { type: 'wheat', nodes: [6,  10] },  // right-upper
-  { type: '3:1',   nodes: [20, 26] },  // right-middle
-  { type: 'sheep', nodes: [32, 37] },  // right-lower
-  { type: 'brick', nodes: [50, 53] },  // bottom
-  { type: '3:1',   nodes: [43, 47] },  // bottom-left
-  { type: 'wood',  nodes: [21, 27] },  // left
+  { type: '3:1',   nodes: [0,  3]  },
+  { type: 'ore',   nodes: [1,  4]  },
+  { type: '3:1',   nodes: [2,  6]  },
+  { type: 'wheat', nodes: [6,  10] },
+  { type: '3:1',   nodes: [20, 26] },
+  { type: 'sheep', nodes: [32, 37] },
+  { type: 'brick', nodes: [50, 53] },
+  { type: '3:1',   nodes: [43, 47] },
+  { type: 'wood',  nodes: [21, 27] },
 ];
 
 const PORT_ICON: Record<PortType, string> = {
@@ -64,10 +103,11 @@ const RESOURCE_COLORS: Record<string, string> = {
   ore:    '#6b7280',
   brick:  '#b85c3a',
   desert: '#c9a84c',
+  gold:   '#a87c1a',
 };
 
 const RESOURCE_ICON: Record<string, string> = {
-  wood: '🌲', sheep: '🐑', wheat: '🌾', ore: '⛰️', brick: '🧱', desert: '🏜️',
+  wood: '🌲', sheep: '🐑', wheat: '🌾', ore: '⛰️', brick: '🧱', desert: '🏜️', gold: '⭐',
 };
 
 const PROB_DOTS: Record<number, number> = { 2:1, 3:2, 4:3, 5:4, 6:5, 8:5, 9:4, 10:3, 11:2, 12:1 };
@@ -131,7 +171,7 @@ function useImageExists(src: string): boolean {
   return exists;
 }
 
-// ── HexTile ───────────────────────────────────────────────────────────────────
+// ── HexTile (main island) ─────────────────────────────────────────────────────
 function HexTile({ tile, isRobber }: { tile: TileData; isRobber: boolean }) {
   const [cx, cy] = TILE_CENTERS[tile.index];
   const imgSrc = `/img/${tile.resource}.jpg`;
@@ -142,63 +182,96 @@ function HexTile({ tile, isRobber }: { tile: TileData; isRobber: boolean }) {
 
   return (
     <g>
-      <polygon
-        points={hexPoints(cx, cy, R - 1)}
-        fill={color}
-        stroke={isRobber ? '#6d28d9' : '#0a1218'}
-        strokeWidth={2}
-      />
+      <polygon points={hexPoints(cx, cy, R - 1)} fill={color}
+        stroke={isRobber ? '#6d28d9' : '#0a1218'} strokeWidth={2} />
       {imgExists && (
         <clipPath id={`hex-clip-${tile.index}`}>
           <polygon points={hexPoints(cx, cy, R - 2)} />
         </clipPath>
       )}
       {imgExists && (
-        <image
-          href={imgSrc}
-          x={cx - R + 1} y={cy - R + 1}
+        <image href={imgSrc} x={cx - R + 1} y={cy - R + 1}
           width={(R - 1) * 2} height={(R - 1) * 2}
           preserveAspectRatio="xMidYMid slice"
-          clipPath={`url(#hex-clip-${tile.index})`}
-          opacity={0.85}
-        />
+          clipPath={`url(#hex-clip-${tile.index})`} opacity={0.85} />
       )}
       {!imgExists && tile.resource !== 'desert' && (
         <text x={cx} y={cy - 10} textAnchor="middle" fontSize={16}
-          style={{ userSelect: 'none' }}>
-          {RESOURCE_ICON[tile.resource]}
-        </text>
+          style={{ userSelect: 'none' }}>{RESOURCE_ICON[tile.resource]}</text>
       )}
       {!imgExists && tile.resource === 'desert' && (
         <text x={cx} y={cy + 5} textAnchor="middle" fontSize={18}
-          style={{ userSelect: 'none' }}>
-          🏜️
-        </text>
+          style={{ userSelect: 'none' }}>🏜️</text>
       )}
-      {/* Number token — black bg, white text */}
       {tile.number > 0 && !isRobber && (
         <g>
           <circle cx={cx} cy={cy + 10} r={14} fill="#000" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
           <text x={cx} y={cy + 10} textAnchor="middle" dominantBaseline="central"
-            fontSize={11} fontWeight={700} fill={isHot ? '#ef4444' : '#ffffff'}>
-            {tile.number}
-          </text>
+            fontSize={11} fontWeight={700} fill={isHot ? '#ef4444' : '#ffffff'}>{tile.number}</text>
           <text x={cx} y={cy + 23} textAnchor="middle" fontSize={6}
             fill={isHot ? '#ef4444' : 'rgba(255,255,255,0.5)'} letterSpacing={1}>
             {'•'.repeat(dots)}
           </text>
         </g>
       )}
-      {/* Robber overlay */}
       {isRobber && (
         <g>
           <circle cx={cx} cy={cy} r={20} fill="rgba(0,0,0,0.65)" />
           <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
-            fontSize={22} style={{ userSelect: 'none' }}>
-            🥷
+            fontSize={22} style={{ userSelect: 'none' }}>🥷</text>
+        </g>
+      )}
+    </g>
+  );
+}
+
+// ── OuterHexTile (seafarers outer island) ─────────────────────────────────────
+function OuterHexTile({ tile, isPirate }: { tile: OuterTileData; isPirate: boolean }) {
+  const [cx, cy] = OUTER_CENTERS[tile.index];
+  const isGold = tile.index === 21;
+  const dots = PROB_DOTS[tile.number] ?? 0;
+  const isHot = tile.number === 6 || tile.number === 8;
+  const color = RESOURCE_COLORS[tile.resource] ?? '#888';
+  const icon = RESOURCE_ICON[tile.resource];
+  const islandNum = tile.index - 18;
+
+  return (
+    <g>
+      {/* Sea glow */}
+      <circle cx={cx} cy={cy} r={R + 14} fill="rgba(6,182,212,0.07)" />
+      <polygon points={hexPoints(cx, cy, R - 1)} fill={color}
+        stroke={isPirate ? '#7c3aed' : '#22d3ee'} strokeWidth={isPirate ? 2.5 : 1.5} />
+      {!isPirate && (
+        <text x={cx} y={cy - 10} textAnchor="middle" fontSize={16}
+          style={{ userSelect: 'none' }}>{icon}</text>
+      )}
+      {isGold && !isPirate && (
+        <text x={cx} y={cy - 28} textAnchor="middle" fontSize={7} fontWeight={700}
+          fill="#fbbf24" letterSpacing={0.5}>GOLD FIELD</text>
+      )}
+      {tile.number > 0 && !isPirate && (
+        <g>
+          <circle cx={cx} cy={cy + 10} r={14} fill="#000" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
+          <text x={cx} y={cy + 10} textAnchor="middle" dominantBaseline="central"
+            fontSize={11} fontWeight={700} fill={isHot ? '#ef4444' : '#ffffff'}>{tile.number}</text>
+          <text x={cx} y={cy + 23} textAnchor="middle" fontSize={6}
+            fill={isHot ? '#ef4444' : 'rgba(255,255,255,0.5)'} letterSpacing={1}>
+            {'•'.repeat(dots)}
           </text>
         </g>
       )}
+      {/* Pirate overlay */}
+      {isPirate && (
+        <g>
+          <circle cx={cx} cy={cy} r={20} fill="rgba(0,0,0,0.65)" />
+          <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+            fontSize={20} style={{ userSelect: 'none' }}>🏴‍☠️</text>
+        </g>
+      )}
+      {/* Exploration VP label */}
+      <text x={cx} y={cy + R + 14} textAnchor="middle" fontSize={7} fill="#22d3ee" opacity={0.7}>
+        Island {islandNum} · +1VP first settle
+      </text>
     </g>
   );
 }
@@ -222,10 +295,8 @@ function HouseIcon({ nx, ny, color, city }: { nx: number; ny: number; color: str
     <g>
       <rect x={nx - hw} y={ny - hh / 2} width={hw * 2} height={hh}
         fill={color} stroke="#0d1827" strokeWidth={1.5} rx={1} />
-      <polygon
-        points={`${nx - hw},${ny - hh / 2} ${nx},${ny - hh / 2 - hw * 0.8} ${nx + hw},${ny - hh / 2}`}
-        fill={color} stroke="#0d1827" strokeWidth={1.5}
-      />
+      <polygon points={`${nx - hw},${ny - hh / 2} ${nx},${ny - hh / 2 - hw * 0.8} ${nx + hw},${ny - hh / 2}`}
+        fill={color} stroke="#0d1827" strokeWidth={1.5} />
     </g>
   );
 }
@@ -239,13 +310,25 @@ function Road({ edge, color }: { edge: string; color: string }) {
     stroke={color} strokeWidth={5} strokeLinecap="round" opacity={0.9} />;
 }
 
+// ── Ship (sea edge — dashed, can span main island ↔ outer island nodes) ───────
+function Ship({ edge, color }: { edge: string; color: string }) {
+  const [a, b] = parseEdge(edge);
+  const pa = anyNodePos(a);
+  const pb = anyNodePos(b);
+  if (!pa || !pb) return null;
+  return (
+    <line x1={pa[0]} y1={pa[1]} x2={pb[0]} y2={pb[1]}
+      stroke={color} strokeWidth={4} strokeLinecap="round"
+      strokeDasharray="7,4" opacity={0.85} />
+  );
+}
+
 // ── Port ──────────────────────────────────────────────────────────────────────
 function Port({ port }: { port: PortData }) {
   const [x1, y1] = NODE_POS[port.nodes[0]];
   const [x2, y2] = NODE_POS[port.nodes[1]];
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2;
-  // Push outward from board center
   const bx = BOARD_W / 2;
   const by = BOARD_H / 2;
   const dx = mx - bx;
@@ -257,17 +340,13 @@ function Port({ port }: { port: PortData }) {
 
   return (
     <g>
-      {/* Dashed lines to the two coast nodes */}
       <line x1={px} y1={py} x2={x1} y2={y1}
         stroke={col} strokeWidth={1.2} strokeDasharray="3,2" opacity={0.6} />
       <line x1={px} y1={py} x2={x2} y2={y2}
         stroke={col} strokeWidth={1.2} strokeDasharray="3,2" opacity={0.6} />
-      {/* Port circle */}
       <circle cx={px} cy={py} r={13} fill="#050e1c" stroke={col} strokeWidth={1.5} />
       <text x={px} y={py - 2} textAnchor="middle" dominantBaseline="middle"
-        fontSize={9} style={{ userSelect: 'none' }}>
-        {PORT_ICON[port.type]}
-      </text>
+        fontSize={9} style={{ userSelect: 'none' }}>{PORT_ICON[port.type]}</text>
       <text x={px} y={py + 8} textAnchor="middle"
         fontSize={6} fontWeight={700} fill={col} letterSpacing={0.5}>
         {port.type === '3:1' ? '3:1' : '2:1'}
@@ -280,38 +359,63 @@ function Port({ port }: { port: PortData }) {
 interface Props {
   standings: Standing[];
   robberTile?: number;
+  pirateHex?: number | null;
+  isSeafarers?: boolean;
 }
 
-export default function CatanBoard({ standings, robberTile = 9 }: Props) {
+export default function CatanBoard({ standings, robberTile = 9, pirateHex = null, isSeafarers = false }: Props) {
+  const svgW = isSeafarers ? SEA_W : BOARD_W;
+  const svgH = isSeafarers ? SEA_H : BOARD_H;
+
   return (
     <div style={{
       display: 'inline-block',
-      border: '2px solid #1e3a5f',
+      border: `2px solid ${isSeafarers ? '#0e3a50' : '#1e3a5f'}`,
       borderRadius: 14,
-      boxShadow: '0 0 0 1px rgba(255,255,255,0.04), 0 4px 24px rgba(0,0,0,0.5)',
+      boxShadow: isSeafarers
+        ? '0 0 0 1px rgba(6,182,212,0.08), 0 4px 24px rgba(0,0,0,0.5)'
+        : '0 0 0 1px rgba(255,255,255,0.04), 0 4px 24px rgba(0,0,0,0.5)',
       overflow: 'hidden',
     }}>
-      <svg
-        width={BOARD_W}
-        height={BOARD_H}
-        style={{ display: 'block', background: '#071525' }}
-      >
-        {/* Ocean background */}
-        <rect width={BOARD_W} height={BOARD_H} fill="#071525" />
+      <svg width={svgW} height={svgH} style={{ display: 'block', background: '#071525' }}>
+        <rect width={svgW} height={svgH} fill="#071525" />
 
-        {/* Ports (drawn behind tiles) */}
+        {/* Seafarers: subtle ocean shimmer in the expanded area */}
+        {isSeafarers && (
+          <>
+            <rect x={BOARD_W - 20} y={0} width={SEA_W - BOARD_W + 20} height={SEA_H}
+              fill="rgba(6,182,212,0.025)" />
+            <line x1={BOARD_W - 20} y1={0} x2={BOARD_W - 20} y2={SEA_H}
+              stroke="rgba(6,182,212,0.08)" strokeWidth={1} strokeDasharray="6,4" />
+          </>
+        )}
+
+        {/* Ports */}
         {PORTS.map((p, i) => <Port key={i} port={p} />)}
 
-        {/* Tiles */}
+        {/* Outer island tiles (behind main tiles so they don't overlap) */}
+        {isSeafarers && OUTER_TILES.map(tile => (
+          <OuterHexTile key={tile.index} tile={tile} isPirate={tile.index === pirateHex} />
+        ))}
+
+        {/* Main island tiles */}
         {BOARD_TILES.map(tile => (
           <HexTile key={tile.index} tile={tile} isRobber={tile.index === robberTile} />
         ))}
 
-        {/* Roads */}
+        {/* Roads (main island only) */}
         {standings.map((s, si) => {
           const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
           return (s.roadEdges ?? []).map(edge => (
-            <Road key={`${si}-${edge}`} edge={edge} color={color} />
+            <Road key={`r-${si}-${edge}`} edge={edge} color={color} />
+          ));
+        })}
+
+        {/* Ships (sea edges — can span main island ↔ outer islands) */}
+        {isSeafarers && standings.map((s, si) => {
+          const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
+          return (s.shipEdges ?? []).map(edge => (
+            <Ship key={`sh-${si}-${edge}`} edge={edge} color={color} />
           ));
         })}
 
@@ -319,7 +423,9 @@ export default function CatanBoard({ standings, robberTile = 9 }: Props) {
         {standings.map((s, si) => {
           const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
           return (s.settlementNodes ?? []).map(n => {
-            const [nx, ny] = NODE_POS[n];
+            const pos = isSeafarers ? anyNodePos(n) : NODE_POS[n];
+            if (!pos) return null;
+            const [nx, ny] = pos;
             return <HouseIcon key={`s-${si}-${n}`} nx={nx} ny={ny} color={color} />;
           });
         })}
@@ -328,7 +434,9 @@ export default function CatanBoard({ standings, robberTile = 9 }: Props) {
         {standings.map((s, si) => {
           const color = PLAYER_COLORS[((s.seat ?? (si + 1)) - 1) % PLAYER_COLORS.length].hex;
           return (s.cityNodes ?? []).map(n => {
-            const [nx, ny] = NODE_POS[n];
+            const pos = isSeafarers ? anyNodePos(n) : NODE_POS[n];
+            if (!pos) return null;
+            const [nx, ny] = pos;
             return <HouseIcon key={`c-${si}-${n}`} nx={nx} ny={ny} color={color} city />;
           });
         })}

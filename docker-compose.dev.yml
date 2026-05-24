@@ -22,7 +22,7 @@ services:
     container_name: byte_boards_backend
     restart: unless-stopped
     # db push syncs schema without needing migration files (good for local dev)
-    command: sh -c "npx prisma db push && node dist/index.js"
+    command: sh -c "npx prisma db push --accept-data-loss && node dist/index.js"
     environment:
       DATABASE_URL: "postgresql://admin:admin@db:5432/postgres?schema=public"
       JWT_SECRET: "byte-boards-secret-change-in-production"

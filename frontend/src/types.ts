@@ -33,6 +33,8 @@ export type Standing = {
   settlementNodes?: number[];
   cityNodes?: number[];
   roadEdges?: string[];
+  shipEdges?: string[];
+  islandVPs?: number;
   devCards?: DevCardCounts;
   knightsPlayed?: number;
   hasLargestArmy?: boolean;
@@ -58,6 +60,7 @@ export type MatchDetail = {
   summary: string | null;
   shareToken: string;
   robberTile: number;
+  pirateHex: number | null;
   createdById: number | null;
   standings: Standing[];
   events: MatchEvent[];

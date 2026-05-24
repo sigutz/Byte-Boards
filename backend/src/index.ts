@@ -15,10 +15,17 @@ import {
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
 import { callGemini } from './game/gemini-client';
-import type { RobberPayload, KnightPayload } from './game/ai';
+import type { RobberPayload, KnightPayload, SeafarersContext } from './game/ai';
 import { BOARD_NODES, getEligibleRobberTiles } from './game/graph';
 import { ALL_TRAITS, TRAIT_DESCRIPTIONS, TRAIT_CONFLICTS, validateTraits } from './game/personality';
 import type { Trait } from './game/personality';
+import {
+  SEA_ALL_TILES, OUTER_TILE_INDICES, OUTER_NODES,
+} from './game/seafarers-graph';
+import {
+  collectSeafarersResources, getSeafarersExtraActions,
+  pickGoldResource, checkExplorationVP, createSeafarersInitialPlacement,
+} from './game/seafarers';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'byte-boards-secret-change-in-production';
 
@@ -336,8 +343,10 @@ async function persistAgentState(matchId: string, agentId: number, s: PlayerStat
       settlementNodes: s.settlementNodes as unknown as Prisma.InputJsonValue,
       cityNodes:       s.cityNodes       as unknown as Prisma.InputJsonValue,
       roadEdges:       s.roadEdges       as unknown as Prisma.InputJsonValue,
+      shipEdges:       s.shipEdges       as unknown as Prisma.InputJsonValue,
       devCards:        s.devCards        as unknown as Prisma.InputJsonValue,
       knightsPlayed:   s.knightsPlayed,
+      islandVPs:       s.islandVPs,
     },
   });
 }
@@ -350,13 +359,16 @@ async function runMatchSimulation(matchId: string): Promise<void> {
     const match = await getMatchWithDetails(matchId);
     if (!match || match.status !== MatchStatus.LIVE) return;
 
+    const isSeafarers = match.gameType === 'catan-seafarers';
+    const boardTiles = isSeafarers ? SEA_ALL_TILES : BOARD_TILES;
+
     const stateMap = new Map<number, PlayerState>();
     const isResume = match.agents.some(e => (e.settlementNodes as unknown[]).length > 0);
-    const matchRaw = match as unknown as { devDeck?: DevCardType[]; robberTile?: number; largestArmyHolder?: number | null; longestRoadHolder?: number | null };
+    const matchRaw = match as unknown as { devDeck?: DevCardType[]; robberTile?: number; pirateHex?: number | null; largestArmyHolder?: number | null; longestRoadHolder?: number | null };
 
     if (isResume) {
       for (const entry of match.agents) {
-        const entryRaw = entry as unknown as { knightsPlayed?: number };
+        const entryRaw = entry as unknown as { knightsPlayed?: number; shipEdges?: string[]; islandVPs?: number };
         stateMap.set(entry.agentId, {
           agentId: entry.agentId,
           name: entry.agent.name,
@@ -365,10 +377,12 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           settlementNodes: entry.settlementNodes as unknown as number[],
           cityNodes:       entry.cityNodes       as unknown as number[],
           roadEdges:       entry.roadEdges       as unknown as string[],
+          shipEdges:       entryRaw.shipEdges    ?? [],
           devCards:        { ...EMPTY_DEV_CARDS, ...(entry.devCards as unknown as Partial<DevCardCounts>) },
           knightsPlayed:   entryRaw.knightsPlayed ?? 0,
           hasLargestArmy:  false,
           hasLongestRoad:  false,
+          islandVPs:       entryRaw.islandVPs    ?? 0,
         });
       }
       // Restore largest army holder
@@ -384,10 +398,14 @@ async function runMatchSimulation(matchId: string): Promise<void> {
     } else {
       const takenNodes: number[] = [];
       const takenEdges: string[] = [];
+      const takenShips: string[] = [];
       for (const entry of match.agents) {
-        const placement = createInitialPlacement(takenNodes, takenEdges);
+        const placement = isSeafarers
+          ? createSeafarersInitialPlacement(takenNodes, takenEdges, takenShips)
+          : createInitialPlacement(takenNodes, takenEdges);
         takenNodes.push(...placement.settlementNodes);
         takenEdges.push(...placement.roadEdges);
+        if (isSeafarers) takenShips.push(...placement.shipEdges);
         const state: PlayerState = {
           agentId: entry.agentId,
           name: entry.agent.name,
@@ -395,10 +413,12 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           settlementNodes: placement.settlementNodes,
           cityNodes:       placement.cityNodes,
           roadEdges:       placement.roadEdges,
+          shipEdges:       placement.shipEdges ?? [],
           devCards:        { ...EMPTY_DEV_CARDS },
           knightsPlayed:   0,
           hasLargestArmy:  false,
           hasLongestRoad:  false,
+          islandVPs:       0,
         };
         stateMap.set(entry.agentId, state);
         await persistAgentState(matchId, entry.agentId, state);
@@ -420,6 +440,7 @@ async function runMatchSimulation(matchId: string): Promise<void> {
     });
     let turn = isResume ? (lastEvent?.turn ?? 0) + 1 : 1;
     let currentRobberTile: number = matchRaw.robberTile ?? 9;
+    let currentPirateHex: number | null = matchRaw.pirateHex ?? null;
 
     while (true) {
       while (pausedMatchJobs.has(matchId)) {
@@ -436,7 +457,12 @@ async function runMatchSimulation(matchId: string): Promise<void> {
 
       if (total === 7) {
         const msg = handleRobber([...stateMap.values()]);
-        await appendEvent({ matchId, turn, type: EventType.COMMENTARY, text: `Robber! Dice: 7. ${msg}.` });
+        if (isSeafarers) {
+          // Move pirate to a random outer island tile
+          currentPirateHex = OUTER_TILE_INDICES[Math.floor(Math.random() * OUTER_TILE_INDICES.length)];
+          await prisma.match.update({ where: { id: matchId }, data: { pirateHex: currentPirateHex } });
+        }
+        await appendEvent({ matchId, turn, type: EventType.COMMENTARY, text: `${isSeafarers ? 'Pirate & Robber!' : 'Robber!'} Dice: 7. ${msg}${isSeafarers ? ` Pirate moves to tile ${currentPirateHex}.` : '.'}` });
         for (const [agentId, s] of stateMap) {
           await prisma.matchAgent.update({
             where: { matchId_agentId: { matchId, agentId } },
@@ -461,7 +487,19 @@ async function runMatchSimulation(matchId: string): Promise<void> {
 
       const gainLog: string[] = [];
       for (const [agentId, s] of stateMap) {
-        const gained = collectResources(s, total, BOARD_TILES, currentRobberTile);
+        let gained: Partial<Record<Resource, number>>;
+        if (isSeafarers) {
+          const { gained: sfGained, goldCount } = collectSeafarersResources(s, total, boardTiles, currentRobberTile, currentPirateHex);
+          gained = sfGained;
+          if (goldCount > 0) {
+            for (let g = 0; g < goldCount; g++) {
+              const pick = pickGoldResource(s);
+              gained[pick] = (gained[pick] ?? 0) + 1;
+            }
+          }
+        } else {
+          gained = collectResources(s, total, BOARD_TILES, currentRobberTile);
+        }
         const entries = (Object.entries(gained) as [string, number][]).filter(([, v]) => v > 0);
         if (entries.length > 0) {
           for (const [res, amt] of entries) {
@@ -511,10 +549,23 @@ async function runMatchSimulation(matchId: string): Promise<void> {
         }
 
         const agentTraits = entry.agent.agentTraits.map(at => at.trait.name as Trait);
+        const sfExtra = isSeafarers
+          ? getSeafarersExtraActions(s, [...stateMap.values()], occupancy)
+          : undefined;
+        const sfCtx: SeafarersContext | undefined = isSeafarers ? {
+          ships: s.shipEdges,
+          pirateHex: currentPirateHex,
+          reachableOuterNodes: [...new Set(
+            s.shipEdges.flatMap(e => [parseInt(e.slice(0, 2), 10), parseInt(e.slice(2, 4), 10)])
+          )].filter(n => OUTER_NODES.has(n)),
+          islandVPs: s.islandVPs,
+        } : undefined;
         const { action, commentary } = await getAgentDecision(
           entry.agent.name, s, opponents, total, turn, occupancy,
           currentRobberPayload, knightPayload,
           agentTraits.length > 0 ? agentTraits : undefined,
+          sfExtra,
+          sfCtx,
         );
 
         const oldVP = computeVP(s);
@@ -596,10 +647,30 @@ async function runMatchSimulation(matchId: string): Promise<void> {
           }
           actionText = `moves the robber to tile ${newTile}`;
           robberMoved = true;
+        } else if (action.startsWith('build_ship:')) {
+          const edge = action.slice('build_ship:'.length);
+          s.wood -= 1; s.sheep -= 1;
+          s.shipEdges.push(edge);
+          actionText = `builds a ship on sea route ${edge}`;
         } else {
           const result = applyAction(s, action);
           actionText = result.text;
-          if (action.startsWith('build_road:') || action.startsWith('build_settlement:') || action.startsWith('build_city:')) {
+          if (action.startsWith('build_road:') || action.startsWith('build_city:')) {
+            updateLongestRoad(stateMap);
+            const lrHolder = [...stateMap.values()].find(p => p.hasLongestRoad);
+            await prisma.match.update({ where: { id: matchId }, data: { longestRoadHolder: lrHolder?.agentId ?? null } });
+          }
+          if (action.startsWith('build_settlement:') && isSeafarers) {
+            const nodeId = parseInt(action.slice('build_settlement:'.length), 10);
+            const exploredIsland = checkExplorationVP(nodeId, s.settlementNodes.slice(0, -1));
+            if (exploredIsland > 0) {
+              s.islandVPs += 1;
+              actionText += ` — discovers island ${exploredIsland}! (+1 exploration VP)`;
+            }
+            updateLongestRoad(stateMap);
+            const lrHolder = [...stateMap.values()].find(p => p.hasLongestRoad);
+            await prisma.match.update({ where: { id: matchId }, data: { longestRoadHolder: lrHolder?.agentId ?? null } });
+          } else if (action.startsWith('build_settlement:')) {
             updateLongestRoad(stateMap);
             const lrHolder = [...stateMap.values()].find(p => p.hasLongestRoad);
             await prisma.match.update({ where: { id: matchId }, data: { longestRoadHolder: lrHolder?.agentId ?? null } });
@@ -1135,7 +1206,7 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Match not found' });
     }
 
-    const matchRaw3 = match as unknown as { robberTile?: number; createdById?: number | null };
+    const matchRaw3 = match as unknown as { robberTile?: number; pirateHex?: number | null; createdById?: number | null };
     res.json({
       id: match.id,
       gameType: match.gameType,
@@ -1147,13 +1218,14 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       winner: match.winner?.name ?? null,
       shareToken: match.shareToken,
       robberTile: matchRaw3.robberTile ?? 9,
+      pirateHex: matchRaw3.pirateHex ?? null,
       createdById: matchRaw3.createdById ?? null,
       standings: (() => {
         const matchRaw2 = match as unknown as { largestArmyHolder?: number | null; longestRoadHolder?: number | null };
         const largestArmyHolder = matchRaw2.largestArmyHolder ?? null;
         const longestRoadHolder = matchRaw2.longestRoadHolder ?? null;
         return match.agents.map((entry) => {
-          const entryRaw = entry as unknown as { knightsPlayed?: number };
+          const entryRaw = entry as unknown as { knightsPlayed?: number; shipEdges?: string[]; islandVPs?: number };
           const devCards = { ...EMPTY_DEV_CARDS, ...(entry.devCards as unknown as Partial<DevCardCounts>) };
           return {
             agentId: String(entry.agentId),
@@ -1173,8 +1245,10 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
             settlementNodes: (entry.settlementNodes as unknown as number[]) ?? [],
             cityNodes:       (entry.cityNodes       as unknown as number[]) ?? [],
             roadEdges:       (entry.roadEdges       as unknown as string[]) ?? [],
+            shipEdges:       entryRaw.shipEdges     ?? [],
             devCards,
             knightsPlayed:   entryRaw.knightsPlayed ?? 0,
+            islandVPs:       entryRaw.islandVPs     ?? 0,
             hasLargestArmy:  entry.agentId === largestArmyHolder,
             hasLongestRoad:  entry.agentId === longestRoadHolder,
             createdBy: entry.agent.createdBy
