@@ -66,12 +66,13 @@ export default function HealthCheck({ navigate }: { navigate: (path: string) => 
       const json = await res.json() as HealthData;
       setData(json);
       setStatus('ok');
-    } catch (e) {
+    } catch {
       setBackendReachable(reached ? true : false);
       setStatus('error');
     }
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void runCheck(); }, []);
 
   return (

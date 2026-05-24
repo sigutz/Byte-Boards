@@ -372,6 +372,7 @@ function AppInner() {
 
   useEffect(() => {
     if (!user && isSharePage && shareToken) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShareData(null);
       setShareError('');
       fetch(`${API_BASE}/api/matches/share/${shareToken}`)
