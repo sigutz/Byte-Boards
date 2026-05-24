@@ -28,6 +28,19 @@ type AIInput = {
   opp: { id: number; vp: number; res: number }[];
   robber?: RobberPayload;
   dev?: { kn: number; rb: number; yp: number; mo: number };
+  sea?: {
+    ships: string[];
+    pirate: number | null;
+    reachableOuterNodes: number[];
+    islandVPs: number;
+  };
+};
+
+export type SeafarersContext = {
+  ships: string[];
+  pirateHex: number | null;
+  reachableOuterNodes: number[];
+  islandVPs: number;
 };
 
 function buildRobberMoves(payload: RobberPayload): string[] {
@@ -103,6 +116,10 @@ function describeAction(agentName: string, action: string): string {
     const victim = parts[2] ? ` and steals from agent ${parts[2]}` : '';
     return `${agentName} plays a Knight, placing the robber on tile ${parts[1]}${victim}.`;
   }
+  if (action.startsWith('build_ship:')) {
+    const edge = action.slice('build_ship:'.length);
+    return `${agentName} builds a ship on sea route ${edge} to explore new islands.`;
+  }
   return `${agentName} makes a move.`;
 }
 
@@ -124,11 +141,13 @@ export async function getAgentDecision(
   robberPayload?: RobberPayload,
   knightPayload?: KnightPayload,
   traitsOverride?: Trait[],
+  extraActions?: string[],
+  seafarersCtx?: SeafarersContext,
 ): Promise<AIDecision> {
   const validActions = getValidActions(player, opponents, occupancy);
   const robberMoves = robberPayload ? buildRobberMoves(robberPayload) : [];
   const knightMoves = knightPayload ? buildKnightMoves(knightPayload) : [];
-  const allMoves = [...validActions, ...robberMoves, ...knightMoves];
+  const allMoves = [...validActions, ...robberMoves, ...knightMoves, ...(extraActions ?? [])];
 
   if (!hasGeminiKey()) return heuristicDecision(agentName, allMoves);
 
@@ -151,11 +170,17 @@ export async function getAgentDecision(
     })),
     ...(robberPayload ? { robber: robberPayload } : {}),
     ...(hasDevCards ? { dev: { kn: player.devCards.knight, rb: player.devCards.road_building, yp: player.devCards.year_of_plenty, mo: player.devCards.monopoly } } : {}),
+    ...(seafarersCtx ? { sea: { ships: seafarersCtx.ships, pirate: seafarersCtx.pirateHex, reachableOuterNodes: seafarersCtx.reachableOuterNodes, islandVPs: seafarersCtx.islandVPs } } : {}),
   };
 
   const traits = traitsOverride ?? getAgentTraits(agentName);
   const systemPrompt = buildSystemPrompt(agentName, traits);
-  const userPrompt = `${JSON.stringify(aiInput)}\n\nRespond with JSON: {"a":"<action from moves[]>","c":"<one sentence describing exactly what you are doing and why, naming the specific action — e.g. 'I build a settlement at node 7 to lock in wheat production before the others do.'>"}`;
+
+  const seafarersRules = seafarersCtx
+    ? `\n\nSEAFARERS RULES: Ships cost 1 wood + 1 sheep and extend your reach across the sea (build_ship actions). Each outer island (nodes 54-71) produces its own resource. Settling an outer island FOR THE FIRST TIME earns +1 bonus VP (exploration VP) — you have ${seafarersCtx.islandVPs} so far. The pirate is on tile ${seafarersCtx.pirateHex ?? 'none'} — it blocks production there like the robber. Your ships: [${seafarersCtx.ships.join(', ') || 'none'}]. Outer nodes you can settle via your ship network: [${seafarersCtx.reachableOuterNodes.join(', ') || 'none'}]. Prioritise building ships toward outer islands when you have wood+sheep, then settle to earn exploration VPs.`
+    : '';
+
+  const userPrompt = `${JSON.stringify(aiInput)}${seafarersRules}\n\nRespond with JSON: {"a":"<action from moves[]>","c":"<one sentence describing exactly what you are doing and why, naming the specific action — e.g. 'I build a settlement at node 7 to lock in wheat production before the others do.'>"}`;
 
   try {
     const text = await callGemini(userPrompt, systemPrompt);

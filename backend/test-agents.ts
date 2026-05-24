@@ -5,9 +5,9 @@ import type { PlayerState } from './src/game/catan';
 const base = (): PlayerState => ({
   agentId: 1, name: 'Test',
   wood: 0, brick: 0, ore: 0, wheat: 0, sheep: 0,
-  settlementNodes: [], cityNodes: [], roadEdges: [],
+  settlementNodes: [], cityNodes: [], roadEdges: [], shipEdges: [],
   devCards: { ...EMPTY_DEV_CARDS },
-  knightsPlayed: 0, hasLargestArmy: false, hasLongestRoad: false,
+  knightsPlayed: 0, hasLargestArmy: false, hasLongestRoad: false, islandVPs: 0,
 });
 
 const empty = { settlements: [], cities: [], roads: [] };

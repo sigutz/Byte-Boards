@@ -316,17 +316,25 @@ export default function Dashboard({
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               {['all', ...gameTypes].map((type) => {
+                const isSeafarers = type === 'catan-seafarers';
                 const label = type === 'all'
-                  ? 'Default'
+                  ? 'All'
+                  : type === 'catan-classic'
+                  ? '⬡ Classic'
+                  : isSeafarers
+                  ? '⛵ Seafarers'
                   : type.replace('catan-', '').split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
                 const active = selectedType === type;
+                const activeColor = isSeafarers ? 'rgba(6,182,212,0.45)' : 'rgba(217,119,6,0.45)';
+                const activeBg = isSeafarers ? 'rgba(6,182,212,0.1)' : 'rgba(217,119,6,0.1)';
+                const activeText = isSeafarers ? '#22d3ee' : '#f59e0b';
                 return (
                   <button key={type} onClick={() => onTypeChange(type)} style={{
                     padding: '7px 10px', borderRadius: 7, fontSize: 13,
                     fontWeight: active ? 600 : 400, textAlign: 'left',
-                    border: active ? '1px solid rgba(217,119,6,0.45)' : '1px solid transparent',
-                    background: active ? 'rgba(217,119,6,0.1)' : 'transparent',
-                    color: active ? '#f59e0b' : '#64748b',
+                    border: active ? `1px solid ${activeColor}` : '1px solid transparent',
+                    background: active ? activeBg : 'transparent',
+                    color: active ? activeText : '#64748b',
                     cursor: 'pointer', transition: 'all 0.15s',
                   }}>
                     {label}
@@ -491,14 +499,25 @@ export default function Dashboard({
                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                 background: 'rgba(217,119,6,0.03)',
               }}>
-                <span style={{
-                  padding: '2px 8px', borderRadius: 4,
-                  fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
-                  background: 'rgba(217,119,6,0.12)', border: '1px solid rgba(217,119,6,0.3)',
-                  color: '#d97706', textTransform: 'uppercase',
-                }}>
-                  {selectedMatch.gameType}
-                </span>
+                {selectedMatch.gameType === 'catan-seafarers' ? (
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 4,
+                    fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+                    background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.35)',
+                    color: '#22d3ee', textTransform: 'uppercase',
+                  }}>
+                    ⛵ Seafarers
+                  </span>
+                ) : (
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 4,
+                    fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+                    background: 'rgba(217,119,6,0.12)', border: '1px solid rgba(217,119,6,0.3)',
+                    color: '#d97706', textTransform: 'uppercase',
+                  }}>
+                    {selectedMatch.gameType}
+                  </span>
+                )}
                 <StatusBadge status={selectedMatch.status} />
                 {selectedMatch.winner && (
                   <span style={{ color: '#eab308', fontSize: 13, fontWeight: 600 }}>
@@ -602,6 +621,18 @@ export default function Dashboard({
                               <span style={{ fontSize: 10, color: '#334155', marginLeft: 4 }}>
                                 🏠{entry.settlements ?? 2} 🏙️{entry.cities ?? 0} 🛤️{entry.roads ?? 0}
                               </span>
+                              {selectedMatch.gameType === 'catan-seafarers' && (
+                                <>
+                                  <span style={{ fontSize: 10, color: '#22d3ee', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                    ⛵{(entry.shipEdges ?? []).length}
+                                  </span>
+                                  {(entry.islandVPs ?? 0) > 0 && (
+                                    <span style={{ fontSize: 10, color: '#a78bfa', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                      🏝️+{entry.islandVPs}VP
+                                    </span>
+                                  )}
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
