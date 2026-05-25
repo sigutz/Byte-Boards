@@ -181,29 +181,34 @@ async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<
   const fallback = `${winnerName} won the match.`;
 
   try {
-    const standings = match.agents
-      .map(a => `${a.agent.name}: ${a.score} VP`)
-      .join(', ');
-    const totalTurns = match.events.length > 0
-      ? match.events[match.events.length - 1].turn
-      : 0;
-    const keyMoves = match.events
-      .filter(e => e.type === EventType.MOVE)
-      .slice(-6)
-      .map(e => e.text)
-      .join(' | ');
+    const standings = match.agents.map(a => `${a.agent.name} ${a.score}VP`).join(', ');
 
-    const prompt = JSON.stringify({
-      gameType: match.gameType,
-      winner: winnerName,
-      totalTurns,
-      standings,
-      keyMoves,
-    });
+    // Only effective actions — exclude passes, discards, and robber-only moves
+    const SKIP = /passes their turn|discards|no discards/i;
+    const actions = match.events
+      .filter(e => e.type === EventType.MOVE && e.actor && !SKIP.test(e.text))
+      .map(e => `${e.actor!.name}: ${e.text}`);
+
+    // Sample spread across the match: first quarter, midpoint, last quarter
+    const n = actions.length;
+    const picks = n <= 12
+      ? actions
+      : [
+          ...actions.slice(0, 3),
+          ...actions.slice(Math.floor(n / 2) - 1, Math.floor(n / 2) + 2),
+          ...actions.slice(-4),
+        ];
+
+    if (picks.length === 0) return fallback;
+
+    const prompt =
+      `Game: ${match.gameType === 'catan-seafarers' ? 'Catan Seafarers' : 'Catan Classic'}. ` +
+      `Winner: ${winnerName}. Standings: ${standings}. ` +
+      `Key moves: ${picks.join(' | ')}`;
 
     const raw = await callGemini(
       prompt,
-      'You are a sports commentator summarizing a Catan board game match. Write exactly 2-3 sentences in English. Be narrative and engaging. Return plain text only, no JSON.',
+      'You are a sports commentator writing a 2-3 sentence match recap for a Catan board game. Focus on how the winner secured their victory — mention specific builds, trades, or steals if present. Be vivid and concrete. Plain text only.',
       { responseMimeType: 'text/plain', maxOutputTokens: 150, temperature: 0.8 },
     );
 
@@ -214,19 +219,36 @@ async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<
   }
 }
 
+const BLOCKLIST_RE = /\b(dick|cock|penis|vagina|pussy|fuck|shit|ass|bitch|bastard|cunt|whore|slut|pula|pizda|muie|cacat|futut|futu|cur\b|prost|idiot|retard|nigger|faggot|suge|sugeo|suge-o)\b/i;
+
+function blocklisted(name: string): boolean {
+  return BLOCKLIST_RE.test(name);
+}
+
 async function validateName(name: string): Promise<boolean> {
+  // Always apply local blocklist first — works even when Gemini is rate-limited
+  if (blocklisted(name)) {
+    console.log(`[validateName] "${name}" → BLOCKED by local blocklist`);
+    return false;
+  }
+
   if (!hasGeminiKey()) return true;
+
+  const userPrompt = `Name: "${name}"`;
+  const systemPrompt = 'You are a strict content moderator for a game platform. Reply with exactly one word: CLEAN or OFFENSIVE. The name is OFFENSIVE if it contains profanity, slurs, sexual references, or hate speech in any language — including Romanian words like pula, pizda, muie, cacat, or similar expressions.';
   try {
-    const raw = await callGemini(
-      `Name: "${name}"`,
-      'You are a strict content moderator for a game platform. Reply with exactly one word: CLEAN or OFFENSIVE. The name is OFFENSIVE if it contains profanity, slurs, sexual references, or hate speech in any language — including Romanian words like pula, pizda, muie, cacat, or similar expressions.',
-      { maxOutputTokens: 5, temperature: 0, responseMimeType: 'text/plain' },
-    );
+    const raw = await callGemini(userPrompt, systemPrompt, { maxOutputTokens: 5, temperature: 0, responseMimeType: 'text/plain' });
     const verdict = raw.trim().toUpperCase();
-    console.log(`[validateName] "${name}" → ${verdict}`);
+    console.log('═══════════════════════════════════════════');
+    console.log('[validateName] SYSTEM :', systemPrompt);
+    console.log('[validateName] USER   :', userPrompt);
+    console.log('[validateName] RAW    :', JSON.stringify(raw));
+    console.log('[validateName] VERDICT:', verdict);
+    console.log('[validateName] RESULT :', verdict.includes('OFFENSIVE') ? 'BLOCKED' : 'ALLOWED');
+    console.log('═══════════════════════════════════════════');
     return !verdict.includes('OFFENSIVE');
   } catch (err) {
-    console.warn('[validateName] error, allowing through:', err);
+    console.warn('[validateName] Gemini unavailable — falling back to local blocklist only:', (err as Error).message);
     return true;
   }
 }
