@@ -181,29 +181,42 @@ async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<
 
   try {
     const standings = match.agents
-      .map(a => `${a.agent.name}: ${a.score} VP`)
-      .join(', ');
+      .sort((a, b) => b.score - a.score)
+      .map(a => `${a.agent.name}: ${a.score} VP (${a.settlements} settlements, ${a.cities} cities, ${a.resources} resources)`)
+      .join('\n');
+
+    const allMoves = match.events.filter(e => e.type === EventType.MOVE);
     const totalTurns = match.events.length > 0
       ? match.events[match.events.length - 1].turn
       : 0;
-    const keyMoves = match.events
-      .filter(e => e.type === EventType.MOVE)
-      .slice(-6)
-      .map(e => e.text)
-      .join(' | ');
 
-    const prompt = JSON.stringify({
-      gameType: match.gameType,
-      winner: winnerName,
-      totalTurns,
-      standings,
-      keyMoves,
-    });
+    const importantKeywords = ['city', 'settlement', 'monopoly', 'knight', 'Largest Army', 'Longest Road', 'wins', 'trades'];
+    const importantMoves = allMoves
+      .filter(e => importantKeywords.some(kw => e.text.toLowerCase().includes(kw.toLowerCase())))
+      .slice(0, 12)
+      .map(e => `T${e.turn}: ${e.text}`);
+
+    const earlyMoves = allMoves.slice(0, 4).map(e => `T${e.turn}: ${e.text}`);
+    const lateMoves = allMoves.slice(-5).map(e => `T${e.turn}: ${e.text}`);
+
+    const keyEvents = [...new Map(
+      [...earlyMoves, ...importantMoves, ...lateMoves].map(e => [e, e])
+    ).keys()].join('\n');
+
+    const prompt = `Game: ${match.gameType}
+Winner: ${winnerName}
+Total turns: ${totalTurns}
+
+Final standings:
+${standings}
+
+Key moments:
+${keyEvents}`;
 
     const raw = await callGemini(
       prompt,
-      'You are a sports commentator summarizing a Catan board game match. Write exactly 2-3 sentences in English. Be narrative and engaging. Return plain text only, no JSON.',
-      { responseMimeType: 'text/plain', maxOutputTokens: 150, temperature: 0.8 },
+      'You are an exciting sports commentator narrating a Catan board game match. Write a match summary of 4-6 sentences in English. Cover: how the game started, who was leading early, key turning points (important builds, dev cards, trades), and how the winner clinched victory. Mention specific player names and actions. Be vivid and engaging. Return plain text only, no JSON, no bullet points.',
+      { responseMimeType: 'text/plain', maxOutputTokens: 350, temperature: 0.85 },
     );
 
     const summary = raw.trim();
@@ -1107,6 +1120,14 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
     const match = await getMatchWithDetails(matchId);
     if (!match) {
       return res.status(404).json({ error: 'Match not found' });
+    }
+
+    const winnerName = (match as unknown as { winner?: { name: string } | null }).winner?.name ?? 'Unknown';
+    const isShortFallback = !match.summary || match.summary === `${winnerName} won the match.`;
+    if (match.status === MatchStatus.COMPLETED && isShortFallback) {
+      const generated = await generateAiSummary(match);
+      await prisma.match.update({ where: { id: matchId }, data: { summary: generated } });
+      (match as unknown as { summary: string }).summary = generated;
     }
 
     const matchRaw3 = match as unknown as { robberTile?: number; createdById?: number | null };

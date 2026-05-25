@@ -166,6 +166,18 @@ export default function History({ matches, navigate, gameTypes, selectedType, on
                 </div>
               )}
 
+              {/* AI Summary */}
+              {match.summary && !isLive && (
+                <div style={{
+                  fontSize: 11, color: '#475569', lineHeight: 1.5,
+                  marginBottom: 10, fontStyle: 'italic',
+                  display: '-webkit-box', WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>
+                  {match.summary}
+                </div>
+              )}
+
               {/* Date + actions */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                 <div style={{ fontSize: 11, color: '#334155' }}>
