@@ -209,7 +209,7 @@ async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<
     const raw = await callGemini(
       prompt,
       'You are a sports commentator writing a 2-3 sentence match recap for a Catan board game. Focus on how the winner secured their victory — mention specific builds, trades, or steals if present. Be vivid and concrete. Plain text only.',
-      { responseMimeType: 'text/plain', maxOutputTokens: 150, temperature: 0.8 },
+      { model: 'gemini-1.5-flash-8b', responseMimeType: 'text/plain', maxOutputTokens: 150, temperature: 0.8 },
     );
 
     const summary = raw.trim();

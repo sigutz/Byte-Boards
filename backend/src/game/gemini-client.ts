@@ -34,11 +34,12 @@ const DEFAULT_CONFIG: GenerationConfig = {
 export async function callGemini(
   userPrompt: string,
   systemInstruction: string,
-  config?: Partial<GenerationConfig>,
+  config?: Partial<GenerationConfig> & { model?: string },
 ): Promise<string> {
   if (keys.length === 0) throw new Error('No Gemini API keys configured');
 
-  const generationConfig: GenerationConfig = { ...DEFAULT_CONFIG, ...config };
+  const { model: modelName = 'gemini-2.0-flash', ...restConfig } = config ?? {};
+  const generationConfig: GenerationConfig = { ...DEFAULT_CONFIG, ...restConfig };
   let attempts = 0;
 
   while (attempts < keys.length) {
@@ -46,7 +47,7 @@ export async function callGemini(
     const client = new GoogleGenerativeAI(key);
     try {
       const model = client.getGenerativeModel({
-        model: 'gemini-2.0-flash',
+        model: modelName,
         systemInstruction,
         generationConfig,
       });
