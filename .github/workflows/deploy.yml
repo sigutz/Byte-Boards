@@ -126,6 +126,7 @@ jobs:
 
             echo "── Bringing down old containers ──"
             docker compose down --remove-orphans
+            docker rm -f byte_boards_frontend byte_boards_backend 2>/dev/null || true
 
             echo "── Building and starting containers ──"
             docker compose up --build -d
