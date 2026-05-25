@@ -1,0 +1,17 @@
+Card Name,Description,Labels,List
+[SETUP] Initial project scaffolding,"Set up repo, initial commit structure, and base files.",Setup,Done
+[INFRA] Docker & deployment pipeline,"Configured docker-compose for dev and prod stacks, SSH-based GitHub Actions deploy workflow, VITE_API_BASE_URL build-time injection, localhost port binding.","DevOps",Done
+[AUTH] Auth privacy and share/invite system,"JWT login with USER/ADMIN roles, bcrypt passwords, per-user match privacy, share tokens (cuid), and invite links.","Feature,Backend",Done
+[INFRA] Health check endpoint + frontend page,"Added /api/health backend endpoint and /health-check frontend page for uptime monitoring.",DevOps,Done
+[AI] Catan board graph personality engine and Gemini key rotation,"Full board graph implementation, AI personality engine, and rotation across GEMINI_1–8 API keys for rate-limit resilience.","Feature,AI",Done
+[GAME] Longest road per-player log stop/delete match agent cap,"Implemented longest road tracking, per-player event log, ability to stop/delete a running match, and agent count limits.","Feature,Game",Done
+[GAME] Robber multi-move bug fix + longest road threshold fix,"Fixed a bug where the robber triggered multiple moves and corrected the longest road threshold calculation.",Bug,Done
+[AI] AI-generated match summary via Gemini,Replaced auto-generated text summary with a Gemini-powered narrative match summary.,"Feature,AI",Done
+[GAME] Trait system — AgentTrait table and 3 new traits,"Added Trait and TraitConflict DB tables, seed file, and 3 initial traits; improved trait-to-agent relational binding.","Feature,Game",Done
+[CI] CI test workflow,Added GitHub Actions workflow for automated backend test runs.,DevOps,Done
+[FEATURE] Bot ownership privacy controls and admin delete,"Users can own bots, set match privacy, and admins can delete any match.","Feature,Backend",Done
+[CI] Expand CI — backend build frontend build lint,"Added backend build check, frontend build check, and ESLint gate to CI pipeline.",DevOps,Done
+[CLEANUP] Remove deprecated Agent.traits JSON field,Removed the legacy traits JSON column from the Agent model after migration to the relational AgentTrait table.,Cleanup,Done
+[GAME] Catan Seafarers game mode,"Full Seafarers implementation with ship edges, island VPs, agentic AI support, and distinct UI.","Feature,Game",Done
+[INFRA] Fix production Dockerfile — prisma db push missing flag,Added --accept-data-loss to prisma db push in the production Dockerfile to prevent deploy failures.,"Bug,DevOps",Done
+[UI] Browser tab title and favicon,Updated the browser tab title and added a favicon.,UI,Done

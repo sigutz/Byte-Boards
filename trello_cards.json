@@ -1,0 +1,90 @@
+{
+  "board": "Byte-Boards Development",
+  "lists": [
+    {
+      "name": "Done",
+      "cards": [
+        {
+          "name": "[SETUP] Initial project scaffolding",
+          "desc": "Set up repo, initial commit structure, and base files.",
+          "labels": ["Setup"]
+        },
+        {
+          "name": "[INFRA] Docker & deployment pipeline",
+          "desc": "Configured docker-compose for dev and prod stacks, SSH-based GitHub Actions deploy workflow, VITE_API_BASE_URL build-time injection, localhost port binding.",
+          "labels": ["DevOps"]
+        },
+        {
+          "name": "[AUTH] Auth, privacy, and share/invite system",
+          "desc": "JWT login with USER/ADMIN roles, bcrypt passwords, per-user match privacy, share tokens (cuid), and invite links.",
+          "labels": ["Feature", "Backend"]
+        },
+        {
+          "name": "[INFRA] Health check endpoint + frontend page",
+          "desc": "Added /api/health backend endpoint and /health-check frontend page for uptime monitoring.",
+          "labels": ["DevOps"]
+        },
+        {
+          "name": "[AI] Catan board graph, personality engine, and Gemini key rotation",
+          "desc": "Full board graph implementation, AI personality engine, and rotation across GEMINI_1–8 API keys for rate-limit resilience.",
+          "labels": ["Feature", "AI"]
+        },
+        {
+          "name": "[GAME] Longest road, per-player log, stop/delete match, agent cap",
+          "desc": "Implemented longest road tracking, per-player event log, ability to stop/delete a running match, and agent count limits.",
+          "labels": ["Feature", "Game"]
+        },
+        {
+          "name": "[GAME] Robber multi-move bug fix + longest road threshold fix",
+          "desc": "Fixed a bug where the robber triggered multiple moves and corrected the longest road threshold calculation.",
+          "labels": ["Bug"]
+        },
+        {
+          "name": "[AI] AI-generated match summary via Gemini",
+          "desc": "Replaced auto-generated text summary with a Gemini-powered narrative match summary.",
+          "labels": ["Feature", "AI"]
+        },
+        {
+          "name": "[GAME] Trait system — AgentTrait table and 3 new traits",
+          "desc": "Added Trait and TraitConflict DB tables, seed file, and 3 initial traits; improved trait-to-agent relational binding.",
+          "labels": ["Feature", "Game"]
+        },
+        {
+          "name": "[CI] CI test workflow",
+          "desc": "Added GitHub Actions workflow for automated backend test runs.",
+          "labels": ["DevOps"]
+        },
+        {
+          "name": "[FEATURE] Bot ownership, privacy controls, and admin delete",
+          "desc": "Users can own bots, set match privacy, and admins can delete any match.",
+          "labels": ["Feature", "Backend"]
+        },
+        {
+          "name": "[CI] Expand CI — backend build, frontend build, lint",
+          "desc": "Added backend build check, frontend build check, and ESLint gate to CI pipeline.",
+          "labels": ["DevOps"]
+        },
+        {
+          "name": "[CLEANUP] Remove deprecated Agent.traits JSON field",
+          "desc": "Removed the legacy traits JSON column from the Agent model after migration to the relational AgentTrait table.",
+          "labels": ["Cleanup"]
+        },
+        {
+          "name": "[GAME] Catan Seafarers game mode",
+          "desc": "Full Seafarers implementation with ship edges, island VPs, agentic AI support, and distinct UI.",
+          "labels": ["Feature", "Game"]
+        },
+        {
+          "name": "[INFRA] Fix production Dockerfile — prisma db push missing flag",
+          "desc": "Added --accept-data-loss to prisma db push in the production Dockerfile to prevent deploy failures.",
+          "labels": ["Bug", "DevOps"]
+        },
+        {
+          "name": "[UI] Browser tab title and favicon",
+          "desc": "Updated the browser tab title and added a favicon.",
+          "labels": ["UI"]
+        }
+      ]
+    }
+  ]
+}
