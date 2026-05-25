@@ -1,5 +1,5 @@
 import { useState as useLocalState } from 'react';
-import type { Agent, AgentMetric, MatchDetail, Trait, TraitInfo } from '../types';
+import type { Agent, AgentMetric, MatchDetail, MatchVisibility, Trait, TraitInfo } from '../types';
 import { PLAYER_COLORS, EVENT_STYLES, TARGET_SCORE, apiFetch } from '../types';
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
   toggleAgent: (id: number) => void;
   isCreatingMatch: boolean;
   hasLiveMatch: boolean;
-  startMatch: () => void;
+  startMatch: (name: string, visibility: MatchVisibility) => void;
   onPauseResume: (matchId: string, action: 'pause' | 'resume') => void;
   selectedMatch: MatchDetail | null;
   copyShareLink: () => void;
@@ -34,6 +34,12 @@ const TRAIT_COLORS: Record<Trait, { hex: string; bg: string }> = {
   FastSpender:  { hex: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
   DevFocused:   { hex: '#e879f9', bg: 'rgba(232,121,249,0.12)' },
   Defensive:    { hex: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
+  Diplomatic:   { hex: '#22d3ee', bg: 'rgba(34,211,238,0.12)' },
+  Opportunist:  { hex: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
+  Militarist:   { hex: '#dc2626', bg: 'rgba(220,38,38,0.12)' },
+  Settler:      { hex: '#86efac', bg: 'rgba(134,239,172,0.12)' },
+  Merchant:     { hex: '#fcd34d', bg: 'rgba(252,211,77,0.12)' },
+  Tactician:    { hex: '#818cf8', bg: 'rgba(129,140,248,0.12)' },
 };
 
 function BotCreator({ onCreated, agents }: { onCreated: () => void; agents: Agent[] }) {
@@ -274,6 +280,8 @@ export default function Dashboard({
   onAgentCreated, isAdmin, onDeleteAgent,
 }: Props) {
   const selectedCount = selectedAgentIds.length;
+  const [matchName, setMatchName] = useLocalState('');
+  const [matchVisibility, setMatchVisibility] = useLocalState<MatchVisibility>('PRIVATE');
 
   function getColorIdx(agentId: number) {
     const i = selectedAgentIds.indexOf(agentId);
@@ -448,11 +456,45 @@ export default function Dashboard({
 
             <BotCreator onCreated={onAgentCreated} agents={agents} />
 
+            {/* Match name */}
+            <input
+              type="text"
+              placeholder="Match name (optional)"
+              value={matchName}
+              onChange={e => setMatchName(e.target.value)}
+              maxLength={64}
+              style={{
+                marginTop: 12, width: '100%', boxSizing: 'border-box',
+                padding: '8px 10px', borderRadius: 7, fontSize: 13,
+                background: '#0d1827', border: '1px solid #1a2e47',
+                color: '#cbd5e1', outline: 'none',
+              }}
+            />
+
+            {/* Visibility */}
+            <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+              {(['PRIVATE', 'PROTECTED', 'PUBLIC'] as MatchVisibility[]).map(v => (
+                <button
+                  key={v}
+                  onClick={() => setMatchVisibility(v)}
+                  style={{
+                    flex: 1, padding: '6px 4px', borderRadius: 6, fontSize: 11,
+                    fontWeight: 600, border: `1px solid ${matchVisibility === v ? '#d97706' : '#1a2e47'}`,
+                    background: matchVisibility === v ? 'rgba(217,119,6,0.15)' : 'transparent',
+                    color: matchVisibility === v ? '#f59e0b' : '#475569',
+                    cursor: 'pointer', letterSpacing: '0.05em',
+                  }}
+                >
+                  {v === 'PRIVATE' ? 'Private' : v === 'PROTECTED' ? 'Invited' : 'Public'}
+                </button>
+              ))}
+            </div>
+
             <button
-              onClick={() => void startMatch()}
+              onClick={() => void startMatch(matchName.trim(), matchVisibility)}
               disabled={isCreatingMatch || hasLiveMatch || selectedCount < 2}
               style={{
-                marginTop: 14, width: '100%', padding: '10px', borderRadius: 8,
+                marginTop: 10, width: '100%', padding: '10px', borderRadius: 8,
                 fontSize: 14, fontWeight: 600, border: 'none',
                 cursor: isCreatingMatch || hasLiveMatch || selectedCount < 2 ? 'not-allowed' : 'pointer',
                 background: isCreatingMatch || hasLiveMatch || selectedCount < 2

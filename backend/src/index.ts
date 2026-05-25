@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient, MatchStatus, EventType, Role } from '@prisma/client';
+import { PrismaClient, MatchStatus, EventType, Role, MatchVisibility } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import type { PlayerState, BoardOccupancy, DevCardType, DevCardCounts, Resource } from './game/catan';
 import {
@@ -214,6 +214,20 @@ async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<
   }
 }
 
+async function validateName(name: string): Promise<boolean> {
+  try {
+    const raw = await callGemini(
+      JSON.stringify({ name }),
+      'You are a content moderation system. Respond only with JSON. Return {"ok":true} if the name is appropriate. Return {"ok":false} if it contains offensive language, slurs, sexual content, profanity, or hate speech in any language.',
+      { maxOutputTokens: 20, temperature: 0 },
+    );
+    const result = JSON.parse(raw.trim()) as { ok?: boolean };
+    return result.ok !== false;
+  } catch {
+    return true;
+  }
+}
+
 function publishSse(matchId: string, payload: unknown): void {
   const clients = sseSubscribers.get(matchId);
   if (!clients) return;
@@ -310,7 +324,7 @@ function updateLongestRoad(stateMap: Map<number, PlayerState>): void {
 
   if (currentHolderId === null) {
     let bestId: number | null = null;
-    let bestLen = 5;
+    let bestLen = 4;
     for (const [id, s] of stateMap) {
       const len = roadLen(id, s);
       if (len > bestLen) { bestLen = len; bestId = id; }
@@ -970,6 +984,10 @@ app.post('/api/agents', authenticate, async (req: Request, res: Response) => {
     if (!name || name.length < 2 || name.length > 32) {
       res.status(400).json({ error: 'Name must be 2–32 characters' }); return;
     }
+    const nameOk = await validateName(name);
+    if (!nameOk) {
+      res.status(400).json({ error: 'Name contains inappropriate content' }); return;
+    }
     // Validate against DB (with in-memory fallback)
     const dbTraits = await prisma.trait.findMany({ include: { conflictsAs: true } }).catch(() => []);
     const validTraitNames = dbTraits.length > 0
@@ -1099,6 +1117,18 @@ app.post('/api/matches', async (req: Request, res: Response) => {
     const gameType = GAME_TYPES.includes(requestedType) ? requestedType : GAME_TYPES[0];
     const selectedAgentIds = Array.isArray(req.body?.agentIds) ? req.body.agentIds.map(Number).filter(Number.isFinite) : [];
 
+    const rawName = typeof req.body?.name === 'string' ? req.body.name.trim() : null;
+    const matchName = rawName && rawName.length > 0 ? rawName.slice(0, 64) : null;
+    if (matchName) {
+      const nameOk = await validateName(matchName);
+      if (!nameOk) return res.status(400).json({ error: 'Match name contains inappropriate content' });
+    }
+
+    const rawVisibility = typeof req.body?.visibility === 'string' ? req.body.visibility : 'PRIVATE';
+    const visibility = (['PRIVATE', 'PROTECTED', 'PUBLIC'] as const).includes(rawVisibility as 'PRIVATE' | 'PROTECTED' | 'PUBLIC')
+      ? (rawVisibility as MatchVisibility)
+      : MatchVisibility.PRIVATE;
+
     let creatorId: number | undefined;
     const auth = req.headers.authorization;
     if (auth?.startsWith('Bearer ')) {
@@ -1117,8 +1147,10 @@ app.post('/api/matches', async (req: Request, res: Response) => {
 
     const created = await prisma.match.create({
       data: {
+        name: matchName,
         gameType,
         status: MatchStatus.LIVE,
+        visibility,
         startedAt: new Date(),
         createdById: creatorId,
         agents: {
@@ -1177,8 +1209,10 @@ app.get('/api/matches', authenticate, async (req: Request, res: Response) => {
 
     res.json(matches.map((match) => ({
       id: match.id,
+      name: (match as unknown as { name?: string | null }).name ?? null,
       gameType: match.gameType,
       status: match.status,
+      visibility: (match as unknown as { visibility?: string }).visibility ?? 'PRIVATE',
       createdAt: match.createdAt,
       startedAt: match.startedAt,
       endedAt: match.endedAt,
@@ -1190,6 +1224,78 @@ app.get('/api/matches', authenticate, async (req: Request, res: Response) => {
     })));
   } catch (error) {
     console.error('Error fetching matches:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Public matches + matches where the authenticated user is an invited watcher
+app.get('/api/matches/discover', authenticate, async (req: Request, res: Response) => {
+  try {
+    const matches = await prisma.match.findMany({
+      where: {
+        OR: [
+          { visibility: MatchVisibility.PUBLIC },
+          { watchers: { some: { userId: req.user!.id } } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        winner: true,
+        createdBy: true,
+        agents: { include: { agent: true }, orderBy: { seat: 'asc' } },
+        watchers: { where: { userId: req.user!.id }, select: { userId: true } },
+      },
+    });
+    res.json(matches.map((match) => ({
+      id: match.id,
+      name: (match as unknown as { name?: string | null }).name ?? null,
+      gameType: match.gameType,
+      status: match.status,
+      visibility: (match as unknown as { visibility?: string }).visibility ?? 'PUBLIC',
+      createdAt: match.createdAt,
+      endedAt: match.endedAt,
+      winner: match.winner?.name ?? null,
+      summary: match.summary,
+      shareUrl: `/matches/${match.id}?share=${match.shareToken}`,
+      players: match.agents.map((entry) => entry.agent.name),
+      createdBy: match.createdBy?.name ?? match.createdBy?.email ?? null,
+      isInvited: (match.watchers as { userId: number }[]).some(w => w.userId === req.user!.id),
+    })));
+  } catch (error) {
+    console.error('Error fetching discover matches:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Invite a user (by email) to watch a protected match
+app.post('/api/matches/:id/invite', authenticate, async (req: Request, res: Response) => {
+  try {
+    const matchId = readParam(req.params.id);
+    if (!matchId) return res.status(400).json({ error: 'Invalid match id' });
+
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const match = await prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) return res.status(404).json({ error: 'Match not found' });
+
+    const matchRaw = match as unknown as { createdById?: number | null; visibility?: string };
+    if (matchRaw.createdById !== req.user!.id && req.user!.role !== Role.ADMIN) {
+      return res.status(403).json({ error: 'Only the match creator can invite watchers' });
+    }
+
+    const invitee = await prisma.user.findUnique({ where: { email } });
+    if (!invitee) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.matchWatcher.upsert({
+      where: { matchId_userId: { matchId, userId: invitee.id } },
+      update: {},
+      create: { matchId, userId: invitee.id },
+    });
+
+    res.json({ ok: true, invitedName: invitee.name ?? invitee.email });
+  } catch (error) {
+    console.error('Error inviting watcher:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1206,11 +1312,13 @@ app.get('/api/matches/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Match not found' });
     }
 
-    const matchRaw3 = match as unknown as { robberTile?: number; pirateHex?: number | null; createdById?: number | null };
+    const matchRaw3 = match as unknown as { robberTile?: number; pirateHex?: number | null; createdById?: number | null; name?: string | null; visibility?: string };
     res.json({
       id: match.id,
+      name: matchRaw3.name ?? null,
       gameType: match.gameType,
       status: match.status,
+      visibility: matchRaw3.visibility ?? 'PRIVATE',
       createdAt: match.createdAt,
       startedAt: match.startedAt,
       endedAt: match.endedAt,

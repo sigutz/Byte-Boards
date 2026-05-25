@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MatchDetail as MatchDetailType, Standing, DevCardType, MatchEvent } from '../types';
-import { PLAYER_COLORS, EVENT_STYLES } from '../types';
+import { PLAYER_COLORS, EVENT_STYLES, apiFetch } from '../types';
 import CatanBoard from '../components/CatanBoard';
 
 interface Props {
@@ -340,6 +340,25 @@ function splitSummary(summary: string | null) {
 }
 
 export default function MatchDetailPage({ match, navigate, copyShareLink, linkCopied, invitedBy, currentUserId, isAdmin, onStopMatch, onDeleteMatch }: Props) {
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteOpen, setInviteOpen]   = useState(false);
+  const [inviteMsg, setInviteMsg]     = useState('');
+
+  async function sendInvite() {
+    if (!match || !inviteEmail.trim()) return;
+    try {
+      const result = await apiFetch<{ ok: boolean; invitedName: string }>(
+        `/api/matches/${match.id}/invite`,
+        { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim() }) },
+      );
+      setInviteMsg(`Invited ${result.invitedName}`);
+      setInviteEmail('');
+      setTimeout(() => setInviteMsg(''), 4000);
+    } catch (e) {
+      setInviteMsg((e as Error).message || 'Failed to invite');
+    }
+  }
+
   if (!match) {
     return (
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px', textAlign: 'center', color: '#334155' }}>
@@ -350,6 +369,8 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
 
   const isLive = match.status === 'LIVE';
   const isSeafarers = match.gameType === 'catan-seafarers';
+  const isOwner = isAdmin || (currentUserId != null && match.createdById === currentUserId);
+  const isProtected = match.visibility === 'PROTECTED';
   const { overview, keyMoments } = splitSummary(match.summary);
 
   return (
@@ -400,6 +421,11 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
             {match.gameType}
           </span>
         )}
+        {match.name && (
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#f1f5f9' }}>
+            {match.name}
+          </span>
+        )}
         {isLive ? (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -429,7 +455,46 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
             🏆 {match.winner}
           </span>
         )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {isOwner && isProtected && (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              {inviteOpen ? (
+                <>
+                  <input
+                    type="email"
+                    placeholder="user@email.com"
+                    value={inviteEmail}
+                    onChange={e => setInviteEmail(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && void sendInvite()}
+                    style={{
+                      padding: '4px 8px', borderRadius: 5, fontSize: 12,
+                      border: '1px solid #1a2e47', background: '#0d1827',
+                      color: '#cbd5e1', outline: 'none', width: 170,
+                    }}
+                  />
+                  <button onClick={() => void sendInvite()} style={{
+                    padding: '5px 10px', borderRadius: 6, fontSize: 12,
+                    border: '1px solid rgba(34,211,238,0.3)', background: 'rgba(34,211,238,0.07)',
+                    color: '#22d3ee', cursor: 'pointer',
+                  }}>Send</button>
+                  <button onClick={() => setInviteOpen(false)} style={{
+                    padding: '5px 8px', borderRadius: 6, fontSize: 12,
+                    border: '1px solid #1a2e47', background: 'transparent',
+                    color: '#475569', cursor: 'pointer',
+                  }}>✕</button>
+                </>
+              ) : (
+                <button onClick={() => setInviteOpen(true)} style={{
+                  padding: '5px 12px', borderRadius: 6, fontSize: 12,
+                  border: '1px solid rgba(34,211,238,0.3)', background: 'rgba(34,211,238,0.07)',
+                  color: '#22d3ee', cursor: 'pointer',
+                }}>
+                  Invite watcher
+                </button>
+              )}
+              {inviteMsg && <span style={{ fontSize: 11, color: inviteMsg.startsWith('Invited') ? '#22c55e' : '#f87171' }}>{inviteMsg}</span>}
+            </div>
+          )}
           <button onClick={() => void copyShareLink()} style={{
             padding: '5px 12px', borderRadius: 6, fontSize: 12,
             border: '1px solid #1a2e47', background: 'transparent',
@@ -437,7 +502,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
           }}>
             {linkCopied ? 'Copied!' : 'Copy share link'}
           </button>
-          {(isAdmin || (currentUserId != null && match.createdById === currentUserId)) && isLive && onStopMatch && (
+          {isOwner && isLive && onStopMatch && (
             <button
               onClick={() => { if (confirm('Stop this match?')) onStopMatch(match.id); }}
               style={{
@@ -449,7 +514,7 @@ export default function MatchDetailPage({ match, navigate, copyShareLink, linkCo
               Stop
             </button>
           )}
-          {(isAdmin || (currentUserId != null && match.createdById === currentUserId)) && onDeleteMatch && (
+          {isOwner && onDeleteMatch && (
             <button
               onClick={() => { if (confirm('Delete this match permanently?')) { onDeleteMatch(match.id); navigate('/history'); } }}
               style={{

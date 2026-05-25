@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AuthUser } from './context/AuthContext';
 import type {
-  Agent, AgentMetric, MatchDetail, MatchListItem, SharePayload, User,
+  Agent, AgentMetric, MatchDetail, MatchListItem, MatchVisibility, SharePayload, User,
 } from './types';
 import { apiFetch, API_BASE } from './types';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,6 +16,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Landing from './pages/Landing';
 import HealthCheck from './pages/HealthCheck';
+import Discover from './pages/Discover';
 
 type Invitations = Record<string, string>; // matchId → invitedBy name
 
@@ -80,6 +81,7 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
   const isHistoryPage     = url.pathname === '/history';
   const isPerformancePage = url.pathname === '/performance';
   const isUsersPage       = url.pathname === '/users';
+  const isDiscoverPage    = url.pathname === '/discover';
   const isMatchDetailPage = url.pathname.startsWith('/matches/');
   const isSharePage       = isMatchDetailPage && !!shareToken;
   const matchIdFromPath   = isMatchDetailPage && parts.length >= 2 ? parts[1] : null;
@@ -166,20 +168,20 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
     } catch { setError('Could not delete agent.'); }
   }
 
-  async function startMatch() {
+  async function startMatch(name: string, visibility: MatchVisibility) {
     setIsCreatingMatch(true);
     setError('');
     try {
       const gameType = selectedType === 'all' ? gameTypes[0] : selectedType;
       const payload = await apiFetch<{ id: string }>('/api/matches', {
         method: 'POST',
-        body: JSON.stringify({ gameType, agentIds: selectedAgentIds }),
+        body: JSON.stringify({ gameType, agentIds: selectedAgentIds, name: name || undefined, visibility }),
       });
       saveCreatedMatch(user.id, payload.id);
       setSelectedMatchId(payload.id);
       await loadMatches();
       await loadSelectedMatch(payload.id);
-    } catch { setError('Could not start match.'); }
+    } catch (e) { setError((e as Error).message || 'Could not start match.'); }
     finally { setIsCreatingMatch(false); }
   }
 
@@ -224,6 +226,8 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
     void loadMatches();
     if (isUsersPage) void loadUsers();
   }, [route, selectedType]);
+
+  // Discover page needs no special state — it fetches independently
 
   useEffect(() => {
     const targetId = matchIdFromPath ?? selectedMatchId;
@@ -312,7 +316,11 @@ function AuthenticatedApp({ user, isAdmin, navigate, route }: AuthenticatedAppPr
         <Users users={users} onDeleteUser={deleteUser} currentUserId={user.id} />
       )}
 
-      {!isMatchDetailPage && !isHistoryPage && !isPerformancePage && !isUsersPage && (
+      {isDiscoverPage && (
+        <Discover navigate={navigate} />
+      )}
+
+      {!isMatchDetailPage && !isHistoryPage && !isPerformancePage && !isUsersPage && !isDiscoverPage && (
         <Dashboard
           gameTypes={gameTypes}
           selectedType={selectedType}

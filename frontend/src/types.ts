@@ -1,7 +1,11 @@
+export type MatchVisibility = 'PRIVATE' | 'PROTECTED' | 'PUBLIC';
+
 export type MatchListItem = {
   id: string;
+  name: string | null;
   gameType: string;
   status: 'LIVE' | 'PAUSED' | 'COMPLETED';
+  visibility: MatchVisibility;
   createdAt: string;
   endedAt: string | null;
   winner: string | null;
@@ -9,6 +13,7 @@ export type MatchListItem = {
   players: string[];
   shareUrl: string;
   createdBy: string | null;
+  isInvited?: boolean;
 };
 
 export type DevCardType = 'knight' | 'vp' | 'road_building' | 'year_of_plenty' | 'monopoly';
@@ -52,8 +57,10 @@ export type MatchEvent = {
 
 export type MatchDetail = {
   id: string;
+  name: string | null;
   gameType: string;
   status: 'LIVE' | 'PAUSED' | 'COMPLETED';
+  visibility: MatchVisibility;
   createdAt: string;
   endedAt: string | null;
   winner: string | null;
@@ -85,7 +92,8 @@ export type AgentMetric = {
 
 export type Trait =
   | 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive'
-  | 'SmartBuilder' | 'FastSpender' | 'DevFocused';
+  | 'SmartBuilder' | 'FastSpender' | 'DevFocused'
+  | 'Diplomatic' | 'Opportunist' | 'Militarist' | 'Settler' | 'Merchant' | 'Tactician';
 
 export type TraitInfo = {
   name: Trait;

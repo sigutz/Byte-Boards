@@ -1,19 +1,27 @@
 export type Trait =
   | 'Empathic' | 'Greedy' | 'HardTrader' | 'Aggressive' | 'Expansionist' | 'Defensive'
-  | 'SmartBuilder' | 'FastSpender' | 'DevFocused';
+  | 'SmartBuilder' | 'FastSpender' | 'DevFocused'
+  | 'Diplomatic' | 'Opportunist' | 'Militarist' | 'Settler' | 'Merchant' | 'Tactician';
 
 export const ALL_TRAITS: Trait[] = [
   'Empathic', 'Greedy', 'HardTrader', 'Aggressive', 'Expansionist', 'Defensive',
   'SmartBuilder', 'FastSpender', 'DevFocused',
+  'Diplomatic', 'Opportunist', 'Militarist', 'Settler', 'Merchant', 'Tactician',
 ];
 
 const CONFLICTS: Partial<Record<Trait, Trait[]>> = {
-  Empathic:     ['Aggressive', 'Greedy'],
-  Aggressive:   ['Empathic', 'Defensive'],
+  Empathic:     ['Aggressive', 'Greedy', 'Militarist'],
+  Aggressive:   ['Empathic', 'Defensive', 'Diplomatic'],
   Expansionist: ['Defensive', 'DevFocused'],
   SmartBuilder: ['FastSpender', 'Greedy'],
-  FastSpender:  ['SmartBuilder', 'DevFocused'],
-  DevFocused:   ['FastSpender', 'Expansionist'],
+  FastSpender:  ['SmartBuilder', 'DevFocused', 'Tactician'],
+  DevFocused:   ['FastSpender', 'Expansionist', 'Settler'],
+  Diplomatic:   ['Aggressive', 'Militarist'],
+  Militarist:   ['Diplomatic', 'Empathic'],
+  Opportunist:  ['Tactician'],
+  Settler:      ['Defensive', 'DevFocused'],
+  Merchant:     ['Greedy'],
+  Tactician:    ['FastSpender', 'Opportunist'],
 };
 
 export function validateTraits(traits: Trait[]): boolean {
@@ -41,7 +49,7 @@ export function randomTraits(count: number): Trait[] {
 const FIXED_TRAITS: Record<string, Trait[]> = {
   HexaMind:   ['Expansionist', 'Aggressive'],
   RoadRunner: ['Aggressive', 'HardTrader'],
-  PortTrader: ['Greedy', 'HardTrader'],
+  PortTrader: ['Merchant', 'Tactician'],
   SheepBaron: ['Greedy', 'Defensive'],
 };
 
@@ -59,6 +67,12 @@ export const TRAIT_DESCRIPTIONS: Record<Trait, string> = {
   SmartBuilder: 'You save resources patiently and only build when you can afford the optimal structure.',
   FastSpender:  'You spend resources immediately whenever any build action is available.',
   DevFocused:   'You prioritize buying development cards over physical buildings and save towards them.',
+  Diplomatic:   'You prefer peaceful coexistence, avoid hostile moves, and seek mutually beneficial trades.',
+  Opportunist:  'You react to the current board state and capitalize on openings left by other players.',
+  Militarist:   'You use knight cards aggressively to control the robber and steal from leading players.',
+  Settler:      'You prioritize spreading settlements across diverse tiles to secure multiple resource streams.',
+  Merchant:     'You seek port access and aim to trade at the best available ratios whenever possible.',
+  Tactician:    'You plan your build sequence carefully and time your actions for maximum strategic impact.',
 };
 
 export const TRAIT_CONFLICTS: Partial<Record<Trait, Trait[]>> = CONFLICTS;
