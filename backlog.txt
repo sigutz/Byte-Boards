@@ -1,0 +1,66 @@
+Backlog for AI Board Game Competition App
+Epic 1: Game Setup and Live Viewing
+
+1. Game Selection
+
+    User Story: As a user, I want to choose from 2 board/strategy games so that I can pick which game I want the AI agents to compete in.
+
+    Acceptance Criteria: UI providing a choice between at least 2 distinct games; selection is saved to the current session; clear visual indicator of the chosen game on the dashboard.
+
+2. Trigger Matches
+
+    User Story: As a user, I want to trigger a new AI match on demand so that I can generate fresh content and observe new gameplay.
+
+    Acceptance Criteria: "Start Match" button accessible on the main interface; backend trigger that initiates the AI agents; visual loading state while the match environment initializes.
+
+3. Real-Time Gameplay
+
+    User Story: As a user, I want to watch AI agents play games in real time so that I can observe their decision-making and strategies.
+
+    Acceptance Criteria: Visual representation of the game board; live updates of agent moves with minimal latency; clear UI indicators showing which agent is currently taking its turn.
+
+4. Live Match Commentary
+
+    User Story: As a user, I want to see live AI-generated commentary while a game is being played so that the experience feels more engaging and dynamic.
+
+    Acceptance Criteria: Real-time text feed displayed alongside the live game board; commentary generates and updates dynamically based on specific in-game events; synchronized with agent actions.
+
+Epic 2: History and Analytics
+
+1. Match History Browsing
+
+    User Story: As a user, I want to browse a history of all past AI matches so that I can revisit previous games and track patterns over time.
+
+    Acceptance Criteria: List or grid view of historical matches; displays basic information (date, game type, winning agent); pagination or infinite scroll implemented for easy browsing.
+
+2. History Filtering
+
+    User Story: As a user, I want to filter the match history by game type so that I can focus on the games I care about most.
+
+    Acceptance Criteria: Filter dropdown or toggle buttons for game types; history list updates dynamically based on the selected filter; option to clear filters and view all.
+
+3. Match Details
+
+    User Story: As a user, I want to click on a past match to see its details and statistics so that I can analyze specific moments or outcomes in depth.
+
+    Acceptance Criteria: Dedicated detail page for each match; accessible by clicking on a match card in the history view; displays turn-by-turn breakdowns and final statistics.
+
+4. Agent Performance Metrics
+
+    User Story: As a user, I want to see performance metrics for each AI agent across games so that I can understand which agents perform best and in which games.
+
+    Acceptance Criteria: Dedicated leaderboard or metrics dashboard; displays global stats (e.g., win rates, average game length) for each AI agent; ability to segment metrics by game type.
+
+Epic 3: Post-Game Content and Sharing
+
+1. Post-Game Summaries
+
+    User Story: As a user, I want to read an AI-generated summary after each game so that I can quickly understand what happened without watching the full session.
+
+    Acceptance Criteria: Summary text block is generated automatically when a match concludes; displayed prominently on the post-match screen and the match details page; summary data is saved to the database.
+
+2. Link Sharing
+
+    User Story: As a user, I want to share a match summary via a link so that I can show others interesting or notable AI game outcomes.
+
+    Acceptance Criteria: "Share" button on the match details page; clicking generates a unique URL and copies it to the user's clipboard; the unique URL routes external users directly to the specific match summary page.
