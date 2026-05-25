@@ -125,8 +125,10 @@ jobs:
             } > .env
 
             echo "── Bringing down old containers ──"
-            docker compose down --remove-orphans
+            docker stop byte_boards_frontend byte_boards_backend 2>/dev/null || true
             docker rm -f byte_boards_frontend byte_boards_backend 2>/dev/null || true
+            docker compose down --remove-orphans 2>/dev/null || true
+            docker network rm bytenboard_default 2>/dev/null || true
 
             echo "── Building and starting containers ──"
             docker compose up --build -d
