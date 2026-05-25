@@ -14,7 +14,7 @@ import {
   BOARD_TILES, RESOURCES, EMPTY_DEV_CARDS, shuffleDeck, getValidRoadEdges, computeLongestRoad,
 } from './game/catan';
 import { getAgentDecision } from './game/ai';
-import { callGemini } from './game/gemini-client';
+import { callGemini, hasGeminiKey } from './game/gemini-client';
 import type { RobberPayload, KnightPayload, SeafarersContext } from './game/ai';
 import { BOARD_NODES, getEligibleRobberTiles } from './game/graph';
 import { ALL_TRAITS, TRAIT_DESCRIPTIONS, TRAIT_CONFLICTS, validateTraits } from './game/personality';
@@ -215,15 +215,19 @@ async function generateAiSummary(match: NonNullable<MatchWithDetails>): Promise<
 }
 
 async function validateName(name: string): Promise<boolean> {
+  if (!hasGeminiKey()) return true;
   try {
     const raw = await callGemini(
-      JSON.stringify({ name }),
-      'You are a content moderation system. Respond only with JSON. Return {"ok":true} if the name is appropriate. Return {"ok":false} if it contains offensive language, slurs, sexual content, profanity, or hate speech in any language.',
-      { maxOutputTokens: 20, temperature: 0 },
+      `Name to check: "${name}"`,
+      'You are a strict content moderation system for a game platform. Check if the given name contains ANY offensive content: profanity, slurs, sexual references, hate speech, or any variation/spelling of such words in ANY language (including Romanian). Respond with ONLY valid JSON, no markdown: {"ok":true} if the name is clean, {"ok":false} if it is offensive.',
+      { maxOutputTokens: 30, temperature: 0 },
     );
-    const result = JSON.parse(raw.trim()) as { ok?: boolean };
-    return result.ok !== false;
-  } catch {
+    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const result = JSON.parse(cleaned) as { ok?: boolean };
+    console.log(`[validateName] "${name}" → ok=${String(result.ok)}`);
+    return result.ok === true;
+  } catch (err) {
+    console.warn('[validateName] error, allowing through:', err);
     return true;
   }
 }
