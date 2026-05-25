@@ -218,14 +218,13 @@ async function validateName(name: string): Promise<boolean> {
   if (!hasGeminiKey()) return true;
   try {
     const raw = await callGemini(
-      `Name to check: "${name}"`,
-      'You are a strict content moderation system for a game platform. Check if the given name contains ANY offensive content: profanity, slurs, sexual references, hate speech, or any variation/spelling of such words in ANY language (including Romanian). Respond with ONLY valid JSON, no markdown: {"ok":true} if the name is clean, {"ok":false} if it is offensive.',
-      { maxOutputTokens: 30, temperature: 0 },
+      `Name: "${name}"`,
+      'You are a strict content moderator for a game platform. Reply with exactly one word: CLEAN or OFFENSIVE. The name is OFFENSIVE if it contains profanity, slurs, sexual references, or hate speech in any language — including Romanian words like pula, pizda, muie, cacat, or similar expressions.',
+      { maxOutputTokens: 5, temperature: 0, responseMimeType: 'text/plain' },
     );
-    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const result = JSON.parse(cleaned) as { ok?: boolean };
-    console.log(`[validateName] "${name}" → ok=${String(result.ok)}`);
-    return result.ok === true;
+    const verdict = raw.trim().toUpperCase();
+    console.log(`[validateName] "${name}" → ${verdict}`);
+    return !verdict.includes('OFFENSIVE');
   } catch (err) {
     console.warn('[validateName] error, allowing through:', err);
     return true;
