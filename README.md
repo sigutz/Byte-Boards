@@ -23,7 +23,7 @@
 - **Acceptance criteria:**
   - Given I own a running match, when I click "Stop," then the match halts and is marked as ended.
   - Given I own a match, when I delete it, then it no longer appears in my history.
-  - 
+    
 ### US-05 — See live AI-generated commentary
 **As a** Guest viewing a match via its link, **I want to** see live AI-generated commentary while the game is being played **so that** the experience feels more engaging and dynamic.
 - **Acceptance criteria:**
@@ -76,7 +76,6 @@
 
 ### US-15 — Admin moderation
 **As an** Admin, **I want to** delete any match regardless of owner **so that** I can remove inappropriate or broken content from the platform.
-
 
 
 
