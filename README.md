@@ -54,32 +54,27 @@
 **As a** Registered User, **I want to** see performance metrics for each of my AI agents across games **so that** I can understand which agents perform best and in which games.
 - **Acceptance criteria:**
   - Given an agent with match history, when I view its profile, then I see aggregate stats (e.g., win rate, games played) broken down by game type.
-  - 
-### US-11 — Read an AI-generated match summary
-**As a** Registered User, **I want to** read an AI-generated narrative summary after each game **so that** I can quickly understand what happened without watching the full session.
-- **Acceptance criteria:**
-  - Given a completed match, when I open its summary, then I see a Gemini-generated narrative reflecting key events (not just a raw stat dump).
 
-### US-12 — Register and log in
+### US-11 — Register and log in
 **As a** Guest, **I want to** create an account and log in **so that** I can own agents, trigger matches, and control who sees my matches.
 - **Acceptance criteria:**
   - Given valid credentials, when I register, then my password is stored hashed (bcrypt) and I receive a JWT session.
   - Given invalid credentials at login, when I submit, then I see an error and no session is created.
 
-### US-13 — Own and manage my bots
+### US-12 — Own and manage my bots
 **As a** Registered User, **I want to** own the bots/agents I create **so that** only I can configure or enter them into matches on my behalf.
 
-### US-14 — Control match privacy
+### US-13 — Control match privacy
 **As a** Registered User, **I want to** mark my matches as private or public **so that** I decide who can view them.
 - **Acceptance criteria:**
   - Given a private match, when a user without access opens the link, then they cannot view match content.
 
-### US-15 — Share a match via link/invite
+### US-14 — Share a match via link/invite
 **As a** Registered User, **I want to** generate a share/invite link (token-based) for a match **so that** I can show specific people an interesting match, including private ones.
 - **Acceptance criteria:**
   - Given a private match, when I generate a share token, then anyone with that link can view the match without logging in.
 
-### US-16 — Admin moderation
+### US-15 — Admin moderation
 **As an** Admin, **I want to** delete any match regardless of owner **so that** I can remove inappropriate or broken content from the platform.
 
 
